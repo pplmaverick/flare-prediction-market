@@ -1,0 +1,9 @@
+{
+  "name": "flare-prediction-market-frontend",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Next.js dApp — wallet connect, market list, place bet, claim winnings. Not scaffolded yet.",
+  "scripts": {
+    "dev": "echo 'run: npx create-next-app@latest . to scaffold' && exit 1"
+  }
+}

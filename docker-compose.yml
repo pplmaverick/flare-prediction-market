@@ -1,0 +1,51 @@
+# Modeled on flare-foundation/fce-extension-scaffold's docker-compose.yaml.
+# extension-tee build context points at ./extension (TypeScript) instead of
+# the Go scaffold — Dockerfile there is not written yet.
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save "" --appendonly no
+    ports:
+      - "${REDIS_BIND:-127.0.0.1:6382}:6379"
+    tmpfs:
+      - /data
+
+  ext-proxy:
+    image: ${REGISTRY:-local}/tee-proxy
+    volumes:
+      - ./config/proxy/extension_proxy.coston2.docker.toml:/app/config/config.toml:ro
+    environment:
+      - PROXY_PRIVATE_KEY=${PROXY_PRIVATE_KEY}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${EXT_PROXY_INTERNAL_BIND:-0.0.0.0:6673}:6663"
+      - "${EXT_PROXY_EXTERNAL_BIND:-0.0.0.0:6674}:6664"
+    depends_on:
+      - redis
+
+  extension-tee:
+    build:
+      context: ./extension
+      dockerfile: Dockerfile   # not written yet
+    env_file:
+      - path: ./config/extension.env
+        required: false
+    environment:
+      - MODE=${MODE:-1}
+      - CHAIN_ID=${CHAIN_ID:-114}
+      - INITIAL_OWNER=${INITIAL_OWNER}
+      - GOVERNANCE_SIGNERS=${GOVERNANCE_SIGNERS:-${INITIAL_OWNER}}
+      - GOVERNANCE_THRESHOLD=${GOVERNANCE_THRESHOLD:-1}
+      - PROXY_URL=http://ext-proxy:6663
+      - CONFIG_PORT=5501
+      - SIGN_PORT=7701
+      - EXTENSION_PORT=7702
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - ext-proxy
+
+networks:
+  default:
+    name: ${COMPOSE_NETWORK:-flare-prediction-market_default}
+

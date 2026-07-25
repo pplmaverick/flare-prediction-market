@@ -1,0 +1,26 @@
+.env*
+*.env
+!*.example
+
+# Proxy config containing real indexer DB credentials — .example stays tracked
+config/proxy/extension_proxy.coston2.toml
+config/proxy/extension_proxy.coston2.docker.toml
+config/extension.env
+
+# Node
+node_modules/
+.next/
+dist/
+
+# Simulated TEE keypair (extension/src/keys.ts) — local dev secret, never commit
+.simulated_keys.json
+
+# Foundry — dependencies/ is fetched via `forge soldeer install`, not committed
+# (matches flare-foundry-starter's .gitignore). soldeer.lock IS tracked for
+# reproducible installs, same as a package-lock.json.
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/dependencies/
+
+.DS_Store

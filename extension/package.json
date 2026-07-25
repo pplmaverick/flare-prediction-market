@@ -1,0 +1,26 @@
+{
+  "name": "flare-prediction-market-extension",
+  "version": "0.0.1",
+  "private": true,
+  "description": "TEE-side extension server: bet ledger, FTSO read, settlement signing.",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "axios": "^1.18.1",
+    "dotenv": "^17.4.2",
+    "eccrypto": "^1.1.6",
+    "ethers": "^6.17.0",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/eccrypto": "^1.1.6",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.0.0",
+    "nodemon": "^3.1.14",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.0"
+  }
+}

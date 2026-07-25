@@ -1,46 +1,272 @@
-# Flare Confidential Prediction Market
+# Flare Prediction Market
 
-Hackathon project: a prediction market on FTSO price feeds (starting with BTC/USD),
-settled by a Flare Confidential Compute (FCC) TEE extension. Users bet on price
-direction; bet amount/side can optionally be submitted encrypted so the book stays
-private until settlement.
+![Network](https://img.shields.io/badge/Flare_Coston2_Testnet-114-blue)
+![Solidity](https://img.shields.io/badge/Solidity-0.8.27-purple)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-Status: **skeleton only** — no contract, extension, or frontend logic written yet.
-See the architecture notes below and the design discussion in project history for
-the interface decisions still open.
+A confidential dual-market prediction platform built for Flare's native stack —
+FTSO for price feeds, FDC for cross-chain weather data, and Flare Confidential
+Compute (FCC/TEE) for an encrypted bet ledger. This is purpose-built on Flare's
+primitives, not a generic EVM prediction market ported over with a Chainlink
+feed swapped in.
 
-## Layout
+**Deployed on Coston2 Testnet**
+
+| Field | Value |
+|---|---|
+| Network | Flare Coston2 Testnet |
+| Chain ID | 114 |
+| Contract | `0x072A3A0C04Cf8CDcaf5B4A73a4Ed4fF5A841531f` |
+| Explorer | [View Contract](https://coston2-explorer.flare.network/address/0x072A3A0C04Cf8CDcaf5B4A73a4Ed4fF5A841531f) |
+
+---
+
+## Why Flare-Native
+
+Every core mechanism in this project maps to a Flare-specific primitive — none
+of these are things you'd reach for on a generic EVM chain.
+
+| Problem | Generic EVM approach | Flare-native approach |
+|---|---|---|
+| Settlement price source | Chainlink price feed, off-chain keeper | **FTSO** — `ContractRegistry.getTestFtsoV2().getFeedById()`, a free on-chain view call, no oracle fee, no keeper |
+| Bet privacy | Plaintext bet amount/side stored on-chain (front-runnable, fully public) | **FCC/TEE** — bets are ECIES-encrypted client-side against the TEE's public key; the plaintext ledger only ever exists inside the TEE's memory |
+| Off-chain weather data → on-chain settlement | Centralized oracle push, or a custom bridge with its own trust assumptions | **FDC (Flare Data Connector)** — OpenWeatherMap data enters via a Web2Json attestation, verified on-chain with a Merkle proof (`IFdcVerification.verifyWeb2Json`), independent of the TEE |
+| TEE-computed results reaching the contract | Custom multisig / centralized relayer signs off | Flare's shared **FlareTeeManager** registry (`TeeExtensionRegistry` + `TeeMachineRegistry`) routes instructions to a registered TEE machine and the contract verifies the result via `ecrecover` against the TEE's registered address |
+
+---
+
+## Architecture
 
 ```
-contracts/    Solidity — PredictionMarket.sol (FCC InstructionSender + vault)
-extension/    TypeScript — TEE-side extension server (bet ledger, FTSO read, settlement signing)
-frontend/     Next.js — wallet connect, market list, place bet, claim winnings
-config/proxy/ TEE proxy config (Coston2 indexer DB connection — see .example)
-docker-compose.yml   redis + ext-proxy + extension-tee, modeled on fce-extension-scaffold
+ User
+   │  deposit() / placeBet() / requestPriceSettlement() / requestWeatherSettlement()
+   ▼
+ ┌────────────────────────────────────────────────────────────┐
+ │ PredictionMarket.sol  (Coston2, this repo)                  │
+ │  - PRICE markets: reads FTSO directly (no TEE round trip)   │
+ │  - WEATHER markets: verifies FDC Web2Json proof on-chain    │
+ │  - both paths resolve "what happened" BEFORE asking the TEE │
+ └───────────────────────────┬──────────────────────────────────┘
+                              │ TEE_EXTENSION_REGISTRY.sendInstructions()
+                              ▼
+ ┌────────────────────────────────────────────────────────────┐
+ │ FlareTeeManager  (Flare's shared registry, Diamond proxy)    │
+ │  TeeExtensionRegistry + TeeMachineRegistry                   │
+ │  → getRandomTeeIds() picks a registered TEE machine          │
+ └───────────────────────────┬──────────────────────────────────┘
+                              │ instruction queued
+                              ▼
+ ┌────────────────────────────────────────────────────────────┐
+ │ tee-proxy                                                    │
+ │  indexes the instruction from chain, queues it for the node, │
+ │  collects data-provider cosignatures (threshold submission)  │
+ └───────────────────────────┬──────────────────────────────────┘
+                              │ POST /queue/main (polled by the node)
+                              ▼
+ ┌────────────────────────────────────────────────────────────┐
+ │ extension-tee  (Go, github.com/flare-foundation/tee-node)    │
+ │  tee-node core forwards the action to our handler:           │
+ │  POST /action → internal/extension/extension.go              │
+ │    processAction() → OPType/OPCommand router                 │
+ │    → DEPOSIT / PLACE_BET / SETTLE / WITHDRAW                 │
+ │  (PLACE_BET decrypts via the node's own /decrypt endpoint)   │
+ └───────────────────────────┬──────────────────────────────────┘
+                              │ ActionResult (signed automatically by
+                              │ tee-node's router.SignResult — the extension
+                              │ never touches the private key)
+                              ▼
+ ┌────────────────────────────────────────────────────────────┐
+ │ tee-proxy → cosigned by Coston2 data providers                │
+ └───────────────────────────┬──────────────────────────────────┘
+                              │ settlePriceMarket() / settleWeatherMarket() /
+                              │ executeWithdrawal(..., signature)
+                              ▼
+ ┌────────────────────────────────────────────────────────────┐
+ │ PredictionMarket.sol                                         │
+ │  ecrecover(payloadHash, signature) == teeAddress ?            │
+ │  → finalize market / release funds                           │
+ └────────────────────────────────────────────────────────────┘
 ```
 
-## Reference repos (read for architecture, not copied wholesale)
+---
 
-- `flare-foundation/fce-extension-scaffold` — extension lifecycle, OPType/OPCommand
-  routing, deploy/register/test scripts, docker-compose pattern
-- `flare-foundation/fce-orderbook` — vault deposit/withdraw with TEE-signed
-  withdrawal authorization (`executeWithdrawal`), replay protection
-- `flare-foundation/fce-weather-insurance` — ECIES-encrypted private policy terms,
-  TEE ActionResult signature verification pattern (`settle`, `relayPrivateBuy`)
-- `ethglobalcannes/fce-sign` — TEE extension reading FTSO via `ContractRegistry` +
-  `getFeedByIdInWei`, EIP-712 signed pricing output
+## Core Features
 
-None of the reference repos are TypeScript — scaffold/orderbook/weather-insurance
-are Go, fce-sign is Python. The `extension/` TEE server here is a from-scratch
-TypeScript reimplementation of the same wire protocol (HTTP `/action` handler,
-OPType/OPCommand routing, ActionResult signing) — see project report for the
-protocol details we're reproducing.
+### Dual market types, one settlement pipeline
+`PRICE` markets settle against an FTSO feed (e.g. BTC/USD); `WEATHER` markets
+settle against an FDC-verified OpenWeatherMap reading. Both resolve the
+outcome fully on-chain, independent of the TEE — the TEE's job is uniform
+across both: decrypt the private bet ledger, compute payouts, sign the result.
 
-## Setup (not yet run)
+### Confidential bet ledger
+`placeBet()` carries ECIES ciphertext on-chain (encrypted client-side against
+the TEE's published public key). The existence and timestamp of a bet is
+public — provable no one bet after expiration — but the side and amount stay
+private until the TEE computes payouts at settlement.
+
+### Vault-style deposits, TEE-authorized withdrawals
+The contract only custodies the pooled ERC-20 balance; per-user available/locked
+balances live in TEE memory. Withdrawals execute against a TEE signature over
+`(amount, to, withdrawalId)`, replay-protected by a one-shot `withdrawalId`.
+
+---
+
+## Deployed Contracts
+
+**Coston2 Testnet (114)**
+
+| Contract | Address |
+|---|---|
+| PredictionMarket | `0x072A3A0C04Cf8CDcaf5B4A73a4Ed4fF5A841531f` |
+| FlareTeeManager *(shared Flare infra — TeeExtensionRegistry + TeeMachineRegistry)* | `0x1a9C4A0f9D76c0b1D91d22E24E573a9b377618aE` |
+
+---
+
+## Quick Start
+
+**Prerequisites**
+- [Foundry](https://getfoundry.sh/) (`forge`, `cast`)
+- Node.js 20+ (for the TEE extension)
+- A funded Coston2 wallet ([faucet](https://faucet.flare.network/coston2))
 
 ```bash
-cp config/proxy/extension_proxy.coston2.toml.example config/proxy/extension_proxy.coston2.toml
-# fill in indexer DB credentials — see project notes, NOT committed
-cd extension && npm install   # not yet run
-cd contracts && forge soldeer install   # not yet run — foundry.toml is a stub
+# Contracts
+cd contracts
+forge soldeer install     # pulls forge-std / OpenZeppelin / flare-periphery
+forge build
+forge test
+
+# TEE extension
+cd ../extension
+npm install
+cp .env.example .env
+npm run build
 ```
+
+| Variable | Description |
+|---|---|
+| `DEPLOYMENT_PRIVATE_KEY` | Funded Coston2 key for deploys and admin calls (`setTeeAddress`, `setPayToken`) |
+| `CHAIN_URL` | Coston2 RPC (`https://coston2-api.flare.network/ext/C/rpc`) |
+| `SIMULATED_TEE` | `true` in local/dev mode, `false` for real attestation |
+
+Frontend isn't scaffolded yet — see [Roadmap](#roadmap).
+
+---
+
+## Contract Interface
+
+```solidity
+// Admin
+function setTeeAddress(address _teeAddress) external onlyOwner;
+function setPayToken(address _token) external onlyOwner;
+
+// Market creation
+function createMarket(MarketType marketType, bytes calldata typeParams, uint256 duration)
+    external returns (uint256 marketId);
+
+// Vault
+function deposit(uint256 amount) external payable;             // payable: TEE registry fee
+function withdraw(uint256 amount, address to) external payable;
+function executeWithdrawal(uint256 amount, address to, bytes32 withdrawalId, bytes calldata signature) external;
+
+// Betting
+function placeBet(uint256 marketId, bytes calldata encryptedBet) external payable;
+
+// Settlement
+function requestPriceSettlement(uint256 marketId) external payable;
+function requestWeatherSettlement(uint256 marketId, IWeb2Json.Proof calldata proof) external payable;
+function settlePriceMarket(bytes calldata resultData, bytes32 actionId, string calldata submissionTag, uint8 status, bytes calldata signature) external;
+function settleWeatherMarket(bytes calldata resultData, bytes32 actionId, string calldata submissionTag, uint8 status, bytes calldata signature) external;
+
+// Views
+function marketCount() external view returns (uint256);
+function getMarket(uint256 marketId) external view returns (Market memory);
+```
+
+---
+
+## Implementation Notes
+
+<!-- Pitfalls hit while building against Flare's TEE stack. -->
+
+**TEE identity is ephemeral — every container restart needs a new `setTeeAddress()`**
+`tee-node`'s `node.Initialize()` calls `crypto.GenerateKey()` fresh on every
+process start with no persistence (`node.ZeroState{}`). Rebuilding or
+restarting the `extension-tee` container produces a brand-new keypair, so the
+contract's `teeAddress` immediately goes stale. The correct address isn't a
+literal field in `/info` — it's derived from `teeInfo.publicKey.{x,y}` via the
+standard secp256k1 → Ethereum address formula (`keccak256(x‖y)`, last 20
+bytes). Don't use `machineData.initialOwner` — that's a separately configured
+governance address, unrelated to the TEE's own signing key.
+
+**`deposit()` is `payable` — it needs a fee for the TEE registry, or it reverts `FeeTooLow`**
+Internally it forwards `msg.value` as `TEE_EXTENSION_REGISTRY.sendInstructions{value: fee}()`.
+Calling it with `value: 0` reverts with the custom error `FeeTooLow` (`0x732f9413`).
+The minimum is a small, sub-cent amount of native token — worth confirming
+with `cast estimate` (a free simulation, no broadcast) rather than guessing.
+
+**`ActionResult` signing is automatic — don't manage keys in the extension handler**
+`tee-node`'s router signs whatever `ActionResult` the extension returns from
+`POST /action` (via `router.SignResult`, using the node's own identity key) —
+this already matches the domain-separated hash scheme `PredictionMarket.sol`
+verifies with `ecrecover`. The extension only needs to call the node's own
+`/decrypt` endpoint (loopback-only, same container) to decrypt `PLACE_BET`'s
+ECIES ciphertext — it never touches a private key directly.
+
+**Go tooling under `tools/` doesn't auto-load the project's root `.env`**
+Scripts like `post-build.sh` source `.env` themselves, but a direct
+`cd tools && go run ./cmd/register-tee ...` does not — the tool reads
+`DEPLOYMENT_PRIVATE_KEY`/`CHAIN_URL`/etc. straight from the process
+environment. Run `set -a; source ../.env; set +a` first, or the tool fails
+with unhelpful "empty private key" style errors instead of a clear "no .env"
+message.
+
+**`SETTLE` message decoding: the reference TS implementation drops a field**
+`PredictionMarket.sol`'s `SettleMessage` ABI-encodes 4 fields —
+`(uint256 marketId, address contractAddr, bool outcome, uint256 referenceValue)`
+— matching what `_verifyAndDecodeSettleResult` expects back in
+`ActionResult.Data`. The original TypeScript extension prototype decoded (and
+re-encoded) only 3 fields (`uint256, bool, uint256`), silently dropping
+`contractAddr`. The Go port decodes and re-encodes all 4 fields — worth
+double-checking anywhere this message shape gets touched again.
+
+---
+
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Smart contract | Solidity 0.8.27, Foundry (soldeer for dependencies) |
+| TEE extension | Go, `github.com/flare-foundation/tee-node` |
+| Oracle | FTSO (price), FDC Web2Json (weather) |
+| Confidential compute | Flare Confidential Compute (FCC) — ECIES-encrypted bet ledger |
+| Frontend | TypeScript (planned — see Roadmap) |
+
+---
+
+## Roadmap
+
+**✅ M1 — Contract & price markets (completed)**
+- `PredictionMarket.sol` deployed to Coston2
+- FTSO-backed `PRICE` markets: creation, betting, settlement
+
+**✅ M2 — FCC/TEE extension handler (completed)**
+- Go extension handler for `DEPOSIT` / `PLACE_BET` / `SETTLE` / `WITHDRAW`
+- Confidential bet ledger via ECIES decryption on the TEE side
+
+**⬜ M3 — Frontend integration + full end-to-end test**
+- Wallet connect, market UI, client-side bet encryption
+- End-to-end test across all four op commands on Coston2
+
+**⬜ M4 — Mainnet deployment**
+
+---
+
+## Developer
+
+GitHub: [pplmaverick](https://github.com/pplmaverick)
+Wallet: `0xed2B...78F5`
+
+## License
+
+MIT

@@ -230,6 +230,48 @@ re-encoded) only 3 fields (`uint256, bool, uint256`), silently dropping
 `contractAddr`. The Go port decodes and re-encodes all 4 fields — worth
 double-checking anywhere this message shape gets touched again.
 
+**ECIES ciphertext must match go-ethereum's `ecies` package, not `eccrypto`'s defaults**
+JS `eccrypto`'s default `encrypt()` produces AES-256-CBC ciphertext wired as
+`iv‖ephemPubKey‖mac‖ciphertext`. `tee-node`'s `/decrypt` endpoint wraps
+go-ethereum's `crypto/ecies` (`ECIES_AES128_SHA256`), which uses AES-128
+**CTR**, a different KDF (NIST SP 800-56 concat KDF plus a second SHA-256 pass
+over `Km`), and wires the output as `ephemPubKey‖iv‖ciphertext‖mac`. Encrypting
+with `eccrypto` and sending that ciphertext as-is makes `/decrypt` return HTTP
+400. No off-the-shelf JS library reproduces this exactly — reimplement it with
+Node's `crypto` module (`createECDH('secp256k1')` + `aes-128-ctr` +
+HMAC-SHA256) to match go-ethereum byte-for-byte.
+
+**`register-tee` must be re-run (not just `setTeeAddress()`) after every container restart**
+The TEE's ephemeral key rotates on restart (see above), and `setTeeAddress()`
+only updates the contract's copy of it. `TeeMachineRegistry` still needs a
+fresh `rRap` run (pre-registration, attestation, FTDC availability check,
+`ToProduction`) so the new key's `teeId` gets marked active — otherwise
+`getRandomTeeIds()` keeps routing instructions across whatever `teeId`s are
+already active, which after a few restarts includes stale entries tied to keys
+nobody's listening on anymore. `getActiveTeeMachines`/`getTeeMachineStatus`
+show which are still active; `pause(teeId)` (owner-only) retires the stale
+ones so routing is deterministic again.
+
+**Settlement is two on-chain steps, not one**
+`requestPriceSettlement(marketId)` only reads the FTSO price and sends a
+`SETTLE` instruction to the TEE — it doesn't touch `Market.settled`. The TEE's
+signed result has to be fetched separately (`GET
+/action/result/{actionId}?submissionTag=threshold` on the proxy's external
+port) and submitted via `settlePriceMarket(resultData, actionId, "threshold",
+1, signature)` before `settled` flips to `true`. The proxy also serves a
+`submissionTag=end` result for the same `actionId` — that one carries an
+internal vote-sequence/consensus payload, not the `(marketId, contractAddr,
+outcome, referenceValue)` tuple `settlePriceMarket` expects; using it fails to
+decode.
+
+**The base `docker-compose.yaml` alone doesn't work — always add the `coston2` overlay**
+`docker compose up -d` on its own resolves `ext-proxy`'s DB config to
+`host.docker.internal:3306` with a hardcoded `root`/`root`/`db`, and nothing on
+the host listens there, so `ext-proxy` panics on startup. Bring the stack up
+with both files — `docker compose -f docker-compose.yaml -f
+docker-compose.coston2.yaml up -d` — which swaps in the real Coston2 indexer
+config and the `extension-scaffold-coston2` network.
+
 ---
 
 ## Stack

@@ -5,13 +5,15 @@ import { CloudRain, CurrencyCircleDollar, LockKey, TrendDown, TrendUp } from "@p
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/status-badge";
-import { useMarket, useNow } from "@/lib/hooks";
+import { useMarket, useNow, useBetCount } from "@/lib/hooks";
 import { decodeFeedSymbol, formatCoordinate, getMarketStatus, isPriceMarket } from "@/lib/market";
 import { formatCountdown, formatUnixTimestamp } from "@/lib/format";
 
 export function MarketCard({ marketId }: { marketId: number }) {
   const { data: market, isLoading, isError } = useMarket(marketId);
   const now = useNow();
+  // Hooks must run unconditionally, before the loading/error early-returns below.
+  const { data: betCount } = useBetCount(marketId);
 
   if (isLoading) {
     return (
@@ -89,6 +91,11 @@ export function MarketCard({ marketId }: { marketId: number }) {
               <LockKey size={12} weight="bold" />
               Bets encrypted (TEE)
             </Badge>
+          )}
+          {betCount !== undefined && (
+            <p className="text-xs text-muted-foreground">
+              {betCount} {betCount === 1 ? "bet" : "bets"} placed
+            </p>
           )}
         </CardContent>
       </Card>

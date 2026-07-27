@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/status-badge";
 import { PlaceBetDialog } from "@/components/place-bet-dialog";
+import { YourPosition } from "@/components/your-position";
 import { FinalizeSettlementPanel } from "@/components/finalize-settlement-panel";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useMarket, useFeedPrice, useNow } from "@/lib/hooks";
@@ -153,6 +154,8 @@ export default function MarketDetailPage() {
             {status === "settled" && (
               <p className="text-sm text-muted-foreground">This market is settled. No further action here.</p>
             )}
+
+            <YourPosition marketId={marketId} />
           </CardContent>
         </Card>
       </div>

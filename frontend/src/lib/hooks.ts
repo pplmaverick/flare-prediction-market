@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useReadContract } from "wagmi";
 import {
   predictionMarketContract,
@@ -9,6 +10,7 @@ import {
   flareContractRegistryAbi,
   testFtsoV2Abi,
 } from "./contract";
+import { fetchBetCountForMarket } from "./blockscout";
 import type { Address, Hex } from "viem";
 
 export function useNow(intervalMs = 1000): number {
@@ -32,6 +34,18 @@ export function useMarket(marketId: number) {
     ...predictionMarketContract,
     functionName: "getMarket",
     args: [BigInt(marketId)],
+  });
+}
+
+/** Number of encrypted bets placed on a market — public (an on-chain event
+ * exists per bet), unlike the bet's side/amount which stay TEE-private.
+ * Sourced from Blockscout's API since Coston2's public RPC rejects
+ * address-filtered eth_getLogs (see lib/blockscout.ts). */
+export function useBetCount(marketId: number) {
+  return useQuery({
+    queryKey: ["bet-count", marketId],
+    queryFn: () => fetchBetCountForMarket(marketId),
+    staleTime: 30_000,
   });
 }
 

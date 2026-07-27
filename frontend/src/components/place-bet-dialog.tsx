@@ -18,6 +18,7 @@ import { predictionMarketContract } from "@/lib/contract";
 import { usePayTokenAddress, useErc20Meta } from "@/lib/hooks";
 import { encryptBet } from "@/lib/ecies";
 import { getTeePublicKey } from "@/lib/tee-config";
+import { recordBetPlaced } from "@/lib/bet-history";
 import { parseTokenAmount } from "@/lib/format";
 import { isPriceMarket, type MarketData } from "@/lib/market";
 import { useToast } from "@/components/use-toast";
@@ -26,7 +27,7 @@ import { getFriendlyErrorMessage } from "@/lib/errors";
 const DEFAULT_FEE = "0.05";
 
 export function PlaceBetDialog({ marketId, market }: { marketId: number; market: MarketData }) {
-  const { isConnected } = useAccount();
+  const { address, isConnected } = useAccount();
   const { toast } = useToast();
   const [open, setOpen] = React.useState(false);
   const [isUp, setIsUp] = React.useState(true);
@@ -44,7 +45,8 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
   const isPrice = isPriceMarket(market);
 
   React.useEffect(() => {
-    if (isSuccess) {
+    if (isSuccess && hash && address) {
+      recordBetPlaced(marketId, address, hash);
       toast({
         title: "Bet placed",
         description: "Your encrypted bet was submitted. Its side and amount stay private until settlement.",
@@ -57,7 +59,7 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
       setAmount("");
       reset();
     }
-  }, [isSuccess, toast, reset]);
+  }, [isSuccess, hash, address, marketId, toast, reset]);
 
   async function handleSubmit() {
     if (!teePublicKey) {

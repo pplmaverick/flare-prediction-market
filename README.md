@@ -149,7 +149,15 @@ npm run build
 | `CHAIN_URL` | Coston2 RPC (`https://coston2-api.flare.network/ext/C/rpc`) |
 | `SIMULATED_TEE` | `true` in local/dev mode, `false` for real attestation |
 
-Frontend isn't scaffolded yet — see [Roadmap](#roadmap).
+```bash
+# Frontend
+cd ../frontend
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+See [frontend/README.md](frontend/README.md) for setup details and known gaps.
 
 ---
 
@@ -282,7 +290,7 @@ config and the `extension-scaffold-coston2` network.
 | TEE extension | Go, `github.com/flare-foundation/tee-node` |
 | Oracle | FTSO (price), FDC Web2Json (weather) |
 | Confidential compute | Flare Confidential Compute (FCC) — ECIES-encrypted bet ledger |
-| Frontend | TypeScript (planned — see Roadmap) |
+| Frontend | Next.js 16 (App Router), wagmi + viem, Tailwind v4 |
 
 ---
 
@@ -296,9 +304,14 @@ config and the `extension-scaffold-coston2` network.
 - Go extension handler for `DEPOSIT` / `PLACE_BET` / `SETTLE` / `WITHDRAW`
 - Confidential bet ledger via ECIES decryption on the TEE side
 
-**⬜ M3 — Frontend integration + full end-to-end test**
-- Wallet connect, market UI, client-side bet encryption
-- End-to-end test across all four op commands on Coston2
+**🟡 M3 — Frontend integration (UI complete, live end-to-end test pending)**
+- Wallet connect, market list/detail, vault, and create-market UI (`frontend/`)
+- Client-side ECIES bet encryption, targeting `SIMULATED_TEE=true`'s wire format
+- Settlement/withdrawal finalization UI built against the documented TEE
+  proxy result endpoint, not yet exercised against a live proxy
+- Still open: end-to-end test across all four op commands on Coston2 against
+  the real (non-simulated) TEE, and wiring up WEATHER settlement's FDC proof
+  flow in the UI
 
 **⬜ M4 — Mainnet deployment**
 

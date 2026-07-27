@@ -1,3 +1,4 @@
+import type { Address, Hex } from "viem";
 import { coston2 } from "./chain";
 import { PREDICTION_MARKET_ADDRESS } from "./contract";
 
@@ -19,6 +20,8 @@ interface BlockscoutLogItem {
     method_call: string;
     parameters: BlockscoutLogParam[];
   } | null;
+  transaction_hash: Hex;
+  block_timestamp: string;
 }
 
 interface BlockscoutLogsResponse {
@@ -26,13 +29,14 @@ interface BlockscoutLogsResponse {
   next_page_params: Record<string, string | number> | null;
 }
 
-/** Counts `BetPlaced` events for a given marketId — bet existence is public
- * (on-chain), the side/amount stay private in the TEE. Paginates through
- * Blockscout's log listing for the contract (bounded to avoid runaway loops
- * as activity grows). */
-export async function fetchBetCountForMarket(marketId: number): Promise<number> {
+/** Walks every `BetPlaced` log for the contract via Blockscout's paginated
+ * API, calling `onMatch` for each one (decoded into a plain marketId/bettor
+ * map). Stops early once `onMatch` returns `true`. Bounded to avoid runaway
+ * pagination as activity grows. */
+async function forEachBetPlacedLog(
+  onMatch: (item: BlockscoutLogItem, params: { marketId: string; bettor: string }) => boolean | void
+): Promise<void> {
   let url: string | null = `${EXPLORER_BASE}/api/v2/addresses/${PREDICTION_MARKET_ADDRESS}/logs`;
-  let count = 0;
   const maxPages = 20;
 
   for (let page = 0; url && page < maxPages; page++) {
@@ -42,8 +46,10 @@ export async function fetchBetCountForMarket(marketId: number): Promise<number> 
 
     for (const item of data.items) {
       if (!item.decoded?.method_call.startsWith("BetPlaced(")) continue;
-      const marketIdParam = item.decoded.parameters.find((p) => p.name === "marketId");
-      if (marketIdParam && Number(marketIdParam.value) === marketId) count++;
+      const marketId = item.decoded.parameters.find((p) => p.name === "marketId")?.value;
+      const bettor = item.decoded.parameters.find((p) => p.name === "bettor")?.value;
+      if (marketId === undefined || bettor === undefined) continue;
+      if (onMatch(item, { marketId, bettor }) === true) return;
     }
 
     if (data.next_page_params) {
@@ -55,6 +61,38 @@ export async function fetchBetCountForMarket(marketId: number): Promise<number> 
       url = null;
     }
   }
+}
 
+/** Counts `BetPlaced` events for a given marketId — bet existence is public
+ * (on-chain), the side/amount stay private in the TEE. */
+export async function fetchBetCountForMarket(marketId: number): Promise<number> {
+  let count = 0;
+  await forEachBetPlacedLog((_item, params) => {
+    if (Number(params.marketId) === marketId) count++;
+  });
   return count;
+}
+
+export interface UserBetInfo {
+  txHash: Hex;
+  timestamp: string;
+}
+
+/** Finds this address's (most recent) bet on a market, straight from chain —
+ * works regardless of how or where the bet was placed (this frontend, a
+ * script, a different browser/device), unlike a client-side record of "I
+ * clicked the button just now". */
+export async function fetchUserBetForMarket(marketId: number, bettor: Address): Promise<UserBetInfo | null> {
+  const bettorLower = bettor.toLowerCase();
+  let found: UserBetInfo | null = null;
+
+  await forEachBetPlacedLog((item, params) => {
+    if (Number(params.marketId) === marketId && params.bettor.toLowerCase() === bettorLower) {
+      // Logs come back newest-first; the first match is the most recent bet.
+      found = { txHash: item.transaction_hash, timestamp: item.block_timestamp };
+      return true;
+    }
+  });
+
+  return found;
 }

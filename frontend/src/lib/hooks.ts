@@ -10,7 +10,7 @@ import {
   flareContractRegistryAbi,
   testFtsoV2Abi,
 } from "./contract";
-import { fetchBetCountForMarket } from "./blockscout";
+import { fetchBetCountForMarket, fetchUserBetForMarket } from "./blockscout";
 import type { Address, Hex } from "viem";
 
 export function useNow(intervalMs = 1000): number {
@@ -46,6 +46,19 @@ export function useBetCount(marketId: number) {
     queryKey: ["bet-count", marketId],
     queryFn: () => fetchBetCountForMarket(marketId),
     staleTime: 30_000,
+  });
+}
+
+/** This wallet's bet on a market, if any — read straight from chain, so it
+ * shows up regardless of how or where the bet was placed (this frontend, a
+ * script, another browser/device), unlike a client-side "I just clicked the
+ * button" record. */
+export function useUserBet(marketId: number, address: Address | undefined) {
+  return useQuery({
+    queryKey: ["user-bet", marketId, address],
+    queryFn: () => fetchUserBetForMarket(marketId, address as Address),
+    enabled: !!address,
+    staleTime: 15_000,
   });
 }
 

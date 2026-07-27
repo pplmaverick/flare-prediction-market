@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAccount, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { CloudRain, LockKey, TrendDown, TrendUp, Warning } from "@phosphor-icons/react";
 import {
@@ -18,7 +19,6 @@ import { predictionMarketContract } from "@/lib/contract";
 import { usePayTokenAddress, useErc20Meta } from "@/lib/hooks";
 import { encryptBet } from "@/lib/ecies";
 import { getTeePublicKey } from "@/lib/tee-config";
-import { recordBetPlaced } from "@/lib/bet-history";
 import { parseTokenAmount } from "@/lib/format";
 import { isPriceMarket, type MarketData } from "@/lib/market";
 import { useToast } from "@/components/use-toast";
@@ -29,6 +29,7 @@ const DEFAULT_FEE = "0.05";
 export function PlaceBetDialog({ marketId, market }: { marketId: number; market: MarketData }) {
   const { address, isConnected } = useAccount();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [open, setOpen] = React.useState(false);
   const [isUp, setIsUp] = React.useState(true);
   const [amount, setAmount] = React.useState("");
@@ -46,20 +47,26 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
 
   React.useEffect(() => {
     if (isSuccess && hash && address) {
-      recordBetPlaced(marketId, address, hash);
       toast({
         title: "Bet placed",
         description: "Your encrypted bet was submitted. Its side and amount stay private until settlement.",
         variant: "success",
       });
+      // "Your position" reads this from Blockscout, which indexes a mined tx
+      // with a short lag — refetch now and once more shortly after to pick
+      // it up without requiring a manual page reload.
+      const queryKey = ["user-bet", marketId, address];
+      queryClient.invalidateQueries({ queryKey });
+      const timer = setTimeout(() => queryClient.invalidateQueries({ queryKey }), 3000);
       // Reacting to a mined tx receipt (an external system), not deriving
       // state from props/state.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setOpen(false);
       setAmount("");
       reset();
+      return () => clearTimeout(timer);
     }
-  }, [isSuccess, hash, address, marketId, toast, reset]);
+  }, [isSuccess, hash, address, marketId, toast, reset, queryClient]);
 
   async function handleSubmit() {
     if (!teePublicKey) {

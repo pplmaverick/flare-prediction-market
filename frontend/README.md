@@ -31,11 +31,16 @@ npm run dev
   in this repo to fetch it from. Configure `NEXT_PUBLIC_TEE_PUBKEY_X/Y`
   manually — the simulated extension (`extension/src/server.ts`) prints
   these to its own console on boot.
-- **Bet encryption targets `SIMULATED_TEE=true`.** `src/lib/ecies.ts`
-  reproduces the `eccrypto` wire format the simulated extension expects.
-  A real attested TEE uses a different profile (AES-128-CTR, NIST concat
-  KDF) per the root README's Implementation Notes — swap that module before
-  pointing this UI at a real (non-simulated) TEE.
+- **Bet encryption targets the real tee-node.** `eciesEncrypt` in
+  `src/lib/ecies.ts` implements go-ethereum's `crypto/ecies` with
+  `ECIES_AES128_SHA256` params (AES-128-CTR, NIST SP800-56 concatKDF,
+  HMAC-SHA256) — verified byte-for-byte on 2026-07-27 by encrypting in JS and
+  decrypting with the actual `go-ethereum@v1.17.4`/`tee-node@v0.0.23` code
+  paths (see git history for the cross-check script). If you're instead
+  testing against `flare-prediction-market/extension/src/server.ts`'s
+  `SIMULATED_TEE=true` stub (a different, unrelated stand-in that speaks the
+  `eccrypto` wire format), use `eciesEncryptSimulated` from the same file
+  instead — it's kept but not wired into any UI component.
 - **Settlement/withdrawal finalization needs a live TEE proxy.** Both flows
   fetch a signed result via `app/api/tee/result/route.ts`, which proxies to
   `TEE_PROXY_URL` (server-only env var, avoids browser CORS). If that proxy

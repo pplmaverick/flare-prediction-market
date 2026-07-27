@@ -249,6 +249,15 @@ with `eccrypto` and sending that ciphertext as-is makes `/decrypt` return HTTP
 Node's `crypto` module (`createECDH('secp256k1')` + `aes-128-ctr` +
 HMAC-SHA256) to match go-ethereum byte-for-byte.
 
+Implemented client-side in `frontend/src/lib/ecies.ts`'s `eciesEncrypt`
+(`@noble/secp256k1` for ECDH + WebCrypto for AES-CTR/SHA-256/HMAC — browser
+equivalent of the Node approach above, no server round-trip needed). Verified
+2026-07-27 by encrypting a `(bool, uint256)` payload in JS against a
+freshly-generated keypair and decrypting it with the actual
+`go-ethereum@v1.17.4` + `tee-node@v0.0.23` code paths (pulled from the local
+Go module cache) — byte-for-byte round-trip match, not just a read of the
+source.
+
 **`register-tee` must be re-run (not just `setTeeAddress()`) after every container restart**
 The TEE's ephemeral key rotates on restart (see above), and `setTeeAddress()`
 only updates the contract's copy of it. `TeeMachineRegistry` still needs a

@@ -17,16 +17,19 @@ import { PlaceBetDialog } from "@/components/place-bet-dialog";
 import { YourPosition } from "@/components/your-position";
 import { FinalizeSettlementPanel } from "@/components/finalize-settlement-panel";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useMarket, useFeedPrice, useNow } from "@/lib/hooks";
+import { useMarket, useFeedPrice, useNow, usePayTokenAddress, useErc20Meta } from "@/lib/hooks";
 import {
+  bucketCount,
+  bucketRangeLabel,
   decodeFeedSymbol,
   formatCoordinate,
   formatFtsoPrice,
-  formatRainMm,
+  formatTemperatureC,
   getMarketStatus,
   isPriceMarket,
+  isPriceUp,
 } from "@/lib/market";
-import { formatCountdown, formatUnixTimestamp } from "@/lib/format";
+import { findCityName, formatCountdown, formatTokenAmount, formatUnixTimestamp } from "@/lib/format";
 
 export default function MarketDetailPage() {
   const params = useParams<{ id: string }>();
@@ -36,6 +39,8 @@ export default function MarketDetailPage() {
   // Hooks must run unconditionally on every render, so this is computed
   // before the loading/error early-returns below.
   const feedPrice = useFeedPrice(market && market.marketType === 0 ? market.feedId : undefined);
+  const { data: payToken } = usePayTokenAddress();
+  const { decimals: payDecimals, symbol: paySymbol } = useErc20Meta(payToken);
 
   if (isLoading) {
     return <div className="mx-auto max-w-4xl px-4 py-16 text-center text-muted-foreground">Loading market...</div>;
@@ -51,6 +56,11 @@ export default function MarketDetailPage() {
   const status = getMarketStatus(market, now);
   const isPrice = isPriceMarket(market);
   const priceDecimals = feedPrice.data?.[1] ?? 5;
+  const cityName = !isPrice ? findCityName(market.latitude, market.longitude) : undefined;
+  const totalPoolLabel =
+    payDecimals !== undefined
+      ? `${formatTokenAmount(market.totalPool, payDecimals)}${paySymbol ? ` ${paySymbol}` : ""}`
+      : undefined;
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
@@ -62,7 +72,7 @@ export default function MarketDetailPage() {
           <div>
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Market #{marketId}</p>
             <h1 className="font-mono text-xl font-semibold text-foreground">
-              {isPrice ? decodeFeedSymbol(market.feedId) : "Rainfall Market"}
+              {isPrice ? decodeFeedSymbol(market.feedId) : (cityName ?? "Weather Market")}
             </h1>
           </div>
         </div>
@@ -76,6 +86,7 @@ export default function MarketDetailPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4 text-sm">
             <Row label="Type" value={isPrice ? "Price (FTSO)" : "Weather (FDC)"} />
+            {totalPoolLabel && <Row label="Total pool" value={totalPoolLabel} mono accent />}
             {isPrice ? (
               <>
                 <Row label="Feed" value={decodeFeedSymbol(market.feedId)} mono />
@@ -90,9 +101,15 @@ export default function MarketDetailPage() {
             ) : (
               <>
                 <Row label="Coordinates" value={`${formatCoordinate(market.latitude)}, ${formatCoordinate(market.longitude)}`} mono />
-                <Row label="Rain threshold" value={`${formatRainMm(market.rainThresholdMmE2)} mm`} mono />
+                <Row
+                  label="Buckets"
+                  value={Array.from({ length: bucketCount(market.bucketThresholds) }, (_, i) =>
+                    bucketRangeLabel(market.bucketThresholds, i)
+                  ).join(" / ")}
+                  mono
+                />
                 {market.settled && (
-                  <Row label="Measured rainfall" value={`${formatRainMm(market.referenceValue)} mm`} mono />
+                  <Row label="Measured temperature" value={`${formatTemperatureC(market.referenceValue)}°C`} mono />
                 )}
               </>
             )}
@@ -114,10 +131,21 @@ export default function MarketDetailPage() {
 
             {market.settled && (
               <div className="mt-2 rounded-lg border border-border-strong bg-surface-raised p-3">
-                <Badge variant={market.outcome ? "accent" : "destructive"}>
-                  {market.outcome ? <TrendUp size={12} weight="bold" /> : <TrendDown size={12} weight="bold" />}
-                  Outcome: {market.outcome ? "Yes / Up" : "No / Down"}
-                </Badge>
+                {isPrice ? (
+                  <Badge variant={isPriceUp(market.winningBucket) ? "accent" : "destructive"}>
+                    {isPriceUp(market.winningBucket) ? (
+                      <TrendUp size={12} weight="bold" />
+                    ) : (
+                      <TrendDown size={12} weight="bold" />
+                    )}
+                    Outcome: {isPriceUp(market.winningBucket) ? "Yes / Up" : "No / Down"}
+                  </Badge>
+                ) : (
+                  <Badge variant="accent">
+                    <CloudRain size={12} weight="bold" />
+                    Winning bucket: {bucketRangeLabel(market.bucketThresholds, market.winningBucket)}
+                  </Badge>
+                )}
                 <p className="mt-2 text-xs text-muted-foreground">
                   Payouts were computed privately by the TEE against the encrypted bet ledger.
                   Withdraw your balance from the Vault page.

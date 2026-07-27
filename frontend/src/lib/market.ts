@@ -5,13 +5,15 @@ export interface MarketData {
   startTimestamp: bigint;
   expirationTimestamp: bigint;
   settled: boolean;
-  outcome: boolean;
-  referenceValue: bigint;
+  winningBucket: number; // PRICE: 1 = Up, 0 = Down. WEATHER: index into bucketThresholds.
+  referenceValue: bigint; // signed — WEATHER's measured temperature can be negative
   feedId: Hex;
   startPrice: bigint;
   latitude: bigint;
   longitude: bigint;
-  rainThresholdMmE2: bigint;
+  bucketThresholds: readonly bigint[]; // ascending °C x100 breakpoints; N thresholds -> N+1 buckets
+  bucketPools: readonly bigint[]; // per-bucket pool, only populated after settlement
+  totalPool: bigint;
 }
 
 export type MarketStatus = "open" | "awaiting_settlement" | "settled";
@@ -24,6 +26,12 @@ export function getMarketStatus(market: MarketData, nowSeconds: number): MarketS
 
 export function isPriceMarket(market: MarketData): boolean {
   return market.marketType === 0;
+}
+
+/** PRICE markets encode their winning side as bucket 0 = Down, 1 = Up (same wire shape as
+ * WEATHER's bucket index — see PredictionMarket.sol's PlaceBetMessage). */
+export function isPriceUp(winningBucket: number): boolean {
+  return winningBucket === 1;
 }
 
 // Reverses encodeFeedId: category byte (1) + ASCII symbol, zero-padded to 21 bytes.
@@ -45,10 +53,27 @@ export function formatFtsoPrice(value: bigint, priceDecimals = 5): string {
   });
 }
 
-export function formatRainMm(rainMmE2: bigint): string {
-  return (Number(rainMmE2) / 100).toFixed(2);
+/** °C x100 (signed — WEATHER markets can measure sub-zero temperatures) -> one-decimal string. */
+export function formatTemperatureC(temperatureCelsiusE2: bigint): string {
+  return (Number(temperatureCelsiusE2) / 100).toFixed(1);
 }
 
 export function formatCoordinate(value: bigint): string {
   return (Number(value) / 1e6).toFixed(4);
+}
+
+/** Number of buckets a WEATHER market's thresholds define — N thresholds -> N+1 buckets. */
+export function bucketCount(bucketThresholds: readonly bigint[]): number {
+  return bucketThresholds.length + 1;
+}
+
+/** Human-readable °C range for bucket `index` (0-indexed) against ascending `bucketThresholds` —
+ * mirrors PredictionMarket.sol's `_resolveBucket`: bucket 0 is "< thresholds[0]", the last bucket
+ * is "> thresholds[N-1]", and bucket i in between is "thresholds[i-1]–thresholds[i]". */
+export function bucketRangeLabel(bucketThresholds: readonly bigint[], index: number): string {
+  const n = bucketThresholds.length;
+  if (n === 0) return "—";
+  if (index <= 0) return `< ${formatTemperatureC(bucketThresholds[0])}°C`;
+  if (index >= n) return `> ${formatTemperatureC(bucketThresholds[n - 1])}°C`;
+  return `${formatTemperatureC(bucketThresholds[index - 1])}–${formatTemperatureC(bucketThresholds[index])}°C`;
 }

@@ -4,19 +4,35 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { decodeEventLog, encodeAbiParameters } from "viem";
 import { useAccount, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
-import { CloudRain, CurrencyCircleDollar, PlusCircle } from "@phosphor-icons/react";
+import { CloudRain, CurrencyCircleDollar, Plus, PlusCircle, X } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { predictionMarketContract, MarketType } from "@/lib/contract";
-import { COMMON_FEEDS, DURATION_PRESETS_HOURS, RAIN_THRESHOLD_PRESETS_MM, WEATHER_CITIES, encodeFeedId } from "@/lib/format";
+import { BUCKET_TEMPLATES, COMMON_FEEDS, DURATION_PRESETS_HOURS, WEATHER_CITIES, encodeFeedId } from "@/lib/format";
 import { useToast } from "@/components/use-toast";
 import { getFriendlyErrorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 
 const CUSTOM_CITY = "custom";
+
+/** x100-scaled template thresholds -> plain °C strings for the editable input row. */
+function templateToCelsiusStrings(thresholds: readonly number[]): string[] {
+  return thresholds.map((t) => String(t / 100));
+}
+
+/** Live preview labels for the bucket editor, from the in-progress (plain °C, possibly blank)
+ * threshold strings — "?" stands in for a threshold the user hasn't filled in yet. */
+function previewBucketRanges(thresholds: string[]): string[] {
+  const t = thresholds.map((v) => v || "?");
+  if (t.length === 0) return ["all temperatures"];
+  const ranges = [`<${t[0]}°C`];
+  for (let i = 1; i < t.length; i++) ranges.push(`${t[i - 1]}–${t[i]}°C`);
+  ranges.push(`>${t[t.length - 1]}°C`);
+  return ranges;
+}
 
 export default function CreateMarketPage() {
   const { isConnected } = useAccount();
@@ -29,8 +45,33 @@ export default function CreateMarketPage() {
   const [city, setCity] = React.useState<string>(WEATHER_CITIES[0].name);
   const [latitude, setLatitude] = React.useState(String(WEATHER_CITIES[0].lat));
   const [longitude, setLongitude] = React.useState(String(WEATHER_CITIES[0].lon));
-  const [rainThreshold, setRainThreshold] = React.useState("");
+  const [bucketThresholds, setBucketThresholds] = React.useState<string[]>(
+    templateToCelsiusStrings(BUCKET_TEMPLATES[0].thresholds)
+  );
+  const [activeTemplate, setActiveTemplate] = React.useState<string | null>(BUCKET_TEMPLATES[0].name);
   const [durationHours, setDurationHours] = React.useState("24");
+
+  function applyTemplate(name: string) {
+    const template = BUCKET_TEMPLATES.find((t) => t.name === name);
+    if (!template) return;
+    setBucketThresholds(templateToCelsiusStrings(template.thresholds));
+    setActiveTemplate(name);
+  }
+
+  function updateThreshold(index: number, value: string) {
+    setBucketThresholds((prev) => prev.map((v, i) => (i === index ? value : v)));
+    setActiveTemplate(null);
+  }
+
+  function addThreshold() {
+    setBucketThresholds((prev) => [...prev, ""]);
+    setActiveTemplate(null);
+  }
+
+  function removeThreshold(index: number) {
+    setBucketThresholds((prev) => prev.filter((_, i) => i !== index));
+    setActiveTemplate(null);
+  }
 
   function handleCityChange(name: string) {
     setCity(name);
@@ -89,16 +130,35 @@ export default function CreateMarketPage() {
         { onError: (error) => toast({ title: "Create failed", description: getFriendlyErrorMessage(error), variant: "destructive" }) }
       );
     } else {
-      if (!latitude || !longitude || !rainThreshold) {
-        toast({ title: "Missing fields", description: "Fill in coordinates and rain threshold.", variant: "destructive" });
+      if (!latitude || !longitude) {
+        toast({ title: "Missing fields", description: "Fill in coordinates.", variant: "destructive" });
         return;
       }
+      if (bucketThresholds.length < 2) {
+        toast({ title: "Not enough buckets", description: "Need at least 2 thresholds (3 buckets).", variant: "destructive" });
+        return;
+      }
+      if (bucketThresholds.some((v) => v.trim() === "" || Number.isNaN(Number(v)))) {
+        toast({ title: "Invalid threshold", description: "Every bucket threshold must be a number.", variant: "destructive" });
+        return;
+      }
+      const thresholdsE2 = bucketThresholds.map((v) => BigInt(Math.round(Number(v) * 100)));
+      for (let i = 1; i < thresholdsE2.length; i++) {
+        if (thresholdsE2[i] <= thresholdsE2[i - 1]) {
+          toast({
+            title: "Thresholds must increase",
+            description: "Each bucket threshold must be strictly greater than the previous one.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
       const lat = BigInt(Math.round(Number(latitude) * 1e6));
       const lon = BigInt(Math.round(Number(longitude) * 1e6));
-      const threshold = BigInt(Math.round(Number(rainThreshold) * 100));
       const typeParams = encodeAbiParameters(
-        [{ type: "int256" }, { type: "int256" }, { type: "uint256" }],
-        [lat, lon, threshold]
+        [{ type: "int256" }, { type: "int256" }, { type: "int256[]" }],
+        [lat, lon, thresholdsE2]
       );
       writeContract(
         { ...predictionMarketContract, functionName: "createMarket", args: [MarketType.WEATHER, typeParams, duration] },
@@ -229,36 +289,66 @@ export default function CreateMarketPage() {
                 )}
               </div>
               <div>
-                <Label htmlFor="rain">Rain threshold (mm)</Label>
+                <Label>Temperature buckets</Label>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Bet YES if rainfall exceeds this amount during the market period
+                  Bettors pick which °C range the settlement temperature will land in. Start from a
+                  template or edit thresholds directly.
                 </p>
-                <Input
-                  id="rain"
-                  type="number"
-                  step="any"
-                  placeholder="10"
-                  value={rainThreshold}
-                  onChange={(e) => setRainThreshold(e.target.value)}
-                  className="mt-2"
-                />
-                <div className="mt-2 flex gap-2">
-                  {RAIN_THRESHOLD_PRESETS_MM.map((mm) => (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {BUCKET_TEMPLATES.map((t) => (
                     <button
-                      key={mm}
+                      key={t.name}
                       type="button"
-                      onClick={() => setRainThreshold(String(mm))}
+                      onClick={() => applyTemplate(t.name)}
+                      title={t.hint}
                       className={cn(
                         "cursor-pointer rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
-                        rainThreshold === String(mm)
+                        activeTemplate === t.name
                           ? "border-primary/40 bg-primary/10 text-primary"
                           : "border-border-strong bg-surface-raised text-muted-foreground hover:text-foreground"
                       )}
                     >
-                      {mm}mm
+                      {t.name}
                     </button>
                   ))}
                 </div>
+
+                <div className="mt-3 flex flex-col gap-2">
+                  {bucketThresholds.map((value, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="w-5 shrink-0 text-right text-xs text-muted-foreground">{i + 1}.</span>
+                      <Input
+                        type="number"
+                        step="any"
+                        placeholder="°C"
+                        value={value}
+                        onChange={(e) => updateThreshold(i, e.target.value)}
+                      />
+                      <span className="text-xs text-muted-foreground">°C</span>
+                      <button
+                        type="button"
+                        onClick={() => removeThreshold(i)}
+                        disabled={bucketThresholds.length <= 2}
+                        className="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:text-destructive disabled:cursor-not-allowed disabled:opacity-30"
+                        aria-label="Remove threshold"
+                      >
+                        <X size={14} weight="bold" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addThreshold}
+                    className="mt-1 flex cursor-pointer items-center gap-1.5 self-start rounded-lg border border-dashed border-border-strong px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    <Plus size={14} weight="bold" />
+                    Add threshold
+                  </button>
+                </div>
+
+                <p className="mt-3 text-xs text-muted-foreground">
+                  {bucketThresholds.length + 1} buckets: {previewBucketRanges(bucketThresholds).join(" / ")}
+                </p>
               </div>
             </TabsContent>
 

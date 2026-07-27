@@ -17,10 +17,10 @@ import { Input, Label } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { predictionMarketContract } from "@/lib/contract";
 import { usePayTokenAddress, useErc20Meta } from "@/lib/hooks";
-import { encryptBet } from "@/lib/ecies";
+import { encryptBucketChoice } from "@/lib/ecies";
 import { getTeePublicKey } from "@/lib/tee-config";
 import { parseTokenAmount } from "@/lib/format";
-import { isPriceMarket, type MarketData } from "@/lib/market";
+import { bucketCount, bucketRangeLabel, isPriceMarket, type MarketData } from "@/lib/market";
 import { useToast } from "@/components/use-toast";
 import { getFriendlyErrorMessage } from "@/lib/errors";
 
@@ -31,7 +31,8 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [open, setOpen] = React.useState(false);
-  const [isUp, setIsUp] = React.useState(true);
+  // PRICE markets use bucket 0 = Down, 1 = Up (see PredictionMarket.sol's PlaceBetMessage).
+  const [bucketIndex, setBucketIndex] = React.useState(1);
   const [amount, setAmount] = React.useState("");
   const [fee, setFee] = React.useState(DEFAULT_FEE);
   const [isEncrypting, setIsEncrypting] = React.useState(false);
@@ -44,12 +45,13 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
 
   const teePublicKey = getTeePublicKey();
   const isPrice = isPriceMarket(market);
+  const numBuckets = isPrice ? 2 : bucketCount(market.bucketThresholds);
 
   React.useEffect(() => {
     if (isSuccess && hash && address) {
       toast({
         title: "Bet placed",
-        description: "Your encrypted bet was submitted. Its side and amount stay private until settlement.",
+        description: "Your encrypted bet was submitted. Its side stays private until settlement.",
         variant: "success",
       });
       // "Your position" reads this from Blockscout, which indexes a mined tx
@@ -82,14 +84,14 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
     try {
       setIsEncrypting(true);
       const amountWei = parseTokenAmount(amount, decimals);
-      const ciphertext = await encryptBet(teePublicKey, isUp, amountWei);
+      const ciphertext = await encryptBucketChoice(teePublicKey, bucketIndex);
       setIsEncrypting(false);
 
       writeContract(
         {
           ...predictionMarketContract,
           functionName: "placeBet",
-          args: [BigInt(marketId), ciphertext],
+          args: [BigInt(marketId), amountWei, ciphertext],
           value: parseTokenAmount(fee || "0", 18),
         },
         {
@@ -122,8 +124,9 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
         <DialogHeader>
           <DialogTitle>Place a bet — Market #{marketId}</DialogTitle>
           <DialogDescription>
-            Your side and amount are ECIES-encrypted in your browser before this transaction is
-            signed. Only the TEE can ever decrypt them.
+            Your side is ECIES-encrypted in your browser before this transaction is signed — only
+            the TEE can ever decrypt it. The amount is public on-chain (it feeds the market&apos;s
+            total pool), but which side it&apos;s on stays private until settlement.
           </DialogDescription>
         </DialogHeader>
 
@@ -136,37 +139,61 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
         )}
 
         <div className="flex flex-col gap-4">
-          <div>
-            <Label>Side</Label>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setIsUp(true)}
-                className={cn(
-                  "flex cursor-pointer items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-colors",
-                  isUp
-                    ? "border-accent/40 bg-accent/10 text-accent"
-                    : "border-border-strong bg-surface-raised text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {isPrice ? <TrendUp size={16} weight="bold" /> : <CloudRain size={16} weight="bold" />}
-                {isPrice ? "Up" : "Rain ≥ threshold"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsUp(false)}
-                className={cn(
-                  "flex cursor-pointer items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-colors",
-                  !isUp
-                    ? "border-destructive/40 bg-destructive/10 text-destructive"
-                    : "border-border-strong bg-surface-raised text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <TrendDown size={16} weight="bold" />
-                {isPrice ? "Down" : "No trigger"}
-              </button>
+          {isPrice ? (
+            <div>
+              <Label>Side</Label>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBucketIndex(1)}
+                  className={cn(
+                    "flex cursor-pointer items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-colors",
+                    bucketIndex === 1
+                      ? "border-accent/40 bg-accent/10 text-accent"
+                      : "border-border-strong bg-surface-raised text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <TrendUp size={16} weight="bold" />
+                  Up
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBucketIndex(0)}
+                  className={cn(
+                    "flex cursor-pointer items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-colors",
+                    bucketIndex === 0
+                      ? "border-destructive/40 bg-destructive/10 text-destructive"
+                      : "border-border-strong bg-surface-raised text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <TrendDown size={16} weight="bold" />
+                  Down
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div>
+              <Label>Temperature bucket</Label>
+              <div className="mt-2 flex flex-col gap-2">
+                {Array.from({ length: numBuckets }, (_, i) => i).map((i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setBucketIndex(i)}
+                    className={cn(
+                      "flex cursor-pointer items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors",
+                      bucketIndex === i
+                        ? "border-accent/40 bg-accent/10 text-accent"
+                        : "border-border-strong bg-surface-raised text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <CloudRain size={16} weight="bold" />
+                    {bucketRangeLabel(market.bucketThresholds, i)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div>
             <Label htmlFor="bet-amount">Amount {symbol ? `(${symbol})` : ""}</Label>

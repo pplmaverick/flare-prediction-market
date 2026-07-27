@@ -213,14 +213,14 @@ export const predictionMarketAbi = [
             "internalType": "bool"
           },
           {
-            "name": "outcome",
-            "type": "bool",
-            "internalType": "bool"
+            "name": "winningBucket",
+            "type": "uint8",
+            "internalType": "uint8"
           },
           {
             "name": "referenceValue",
-            "type": "uint256",
-            "internalType": "uint256"
+            "type": "int256",
+            "internalType": "int256"
           },
           {
             "name": "feedId",
@@ -243,7 +243,17 @@ export const predictionMarketAbi = [
             "internalType": "int256"
           },
           {
-            "name": "rainThresholdMmE2",
+            "name": "bucketThresholds",
+            "type": "int256[]",
+            "internalType": "int256[]"
+          },
+          {
+            "name": "bucketPools",
+            "type": "uint256[]",
+            "internalType": "uint256[]"
+          },
+          {
+            "name": "totalPool",
             "type": "uint256",
             "internalType": "uint256"
           }
@@ -297,14 +307,14 @@ export const predictionMarketAbi = [
         "internalType": "bool"
       },
       {
-        "name": "outcome",
-        "type": "bool",
-        "internalType": "bool"
+        "name": "winningBucket",
+        "type": "uint8",
+        "internalType": "uint8"
       },
       {
         "name": "referenceValue",
-        "type": "uint256",
-        "internalType": "uint256"
+        "type": "int256",
+        "internalType": "int256"
       },
       {
         "name": "feedId",
@@ -327,7 +337,7 @@ export const predictionMarketAbi = [
         "internalType": "int256"
       },
       {
-        "name": "rainThresholdMmE2",
+        "name": "totalPool",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -366,6 +376,11 @@ export const predictionMarketAbi = [
     "inputs": [
       {
         "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "amount",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -667,6 +682,12 @@ export const predictionMarketAbi = [
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -732,16 +753,16 @@ export const predictionMarketAbi = [
         "internalType": "uint256"
       },
       {
-        "name": "outcome",
-        "type": "bool",
+        "name": "winningBucket",
+        "type": "uint8",
         "indexed": false,
-        "internalType": "bool"
+        "internalType": "uint8"
       },
       {
         "name": "referenceValue",
-        "type": "uint256",
+        "type": "int256",
         "indexed": false,
-        "internalType": "uint256"
+        "internalType": "int256"
       }
     ],
     "anonymous": false
@@ -776,16 +797,16 @@ export const predictionMarketAbi = [
         "internalType": "bytes32"
       },
       {
-        "name": "outcome",
-        "type": "bool",
+        "name": "winningBucket",
+        "type": "uint8",
         "indexed": false,
-        "internalType": "bool"
+        "internalType": "uint8"
       },
       {
         "name": "referenceValue",
-        "type": "uint256",
+        "type": "int256",
         "indexed": false,
-        "internalType": "uint256"
+        "internalType": "int256"
       }
     ],
     "anonymous": false

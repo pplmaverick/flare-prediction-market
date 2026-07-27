@@ -23,4 +23,9 @@ contracts/cache/
 contracts/broadcast/
 contracts/dependencies/
 
+# FDC script run artifacts (abiEncodedRequest / voting round id / proof hex) — ephemeral,
+# regenerated each settlement run, matches flare-foundry-starter's data/ gitignore.
+contracts/script/fdc/data/*
+!contracts/script/fdc/data/.gitkeep
+
 .DS_Store

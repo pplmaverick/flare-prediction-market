@@ -33,7 +33,8 @@ export function YourPosition({ marketId }: { marketId: number }) {
             <ArrowSquareOut size={13} />
           </a>
           <p className="mt-1 text-xs text-muted-foreground">
-            Side and amount stay private in the TEE — only their existence is public.
+            Which side you bet stays private in the TEE — the bet&apos;s existence and amount are
+            public on-chain.
           </p>
         </>
       ) : (

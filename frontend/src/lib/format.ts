@@ -70,7 +70,23 @@ export const WEATHER_CITIES = [
   { name: "London", lat: 51.507, lon: -0.128 },
 ] as const;
 
-export const RAIN_THRESHOLD_PRESETS_MM = [1, 5, 10, 25] as const;
+/** Reverse-looks-up a WEATHER market's on-chain lat/lon (1e6-scaled) against WEATHER_CITIES —
+ * exact match only (createMarket stores whatever the create form sent verbatim), falls back to
+ * undefined for custom coordinates so callers can show formatted lat/lon instead. */
+export function findCityName(latE6: bigint, lonE6: bigint): string | undefined {
+  const lat = Number(latE6) / 1e6;
+  const lon = Number(lonE6) / 1e6;
+  const match = WEATHER_CITIES.find((c) => Math.abs(c.lat - lat) < 1e-4 && Math.abs(c.lon - lon) < 1e-4);
+  return match?.name;
+}
+
+/** Preset temperature-bucket templates for the WEATHER create-market form — ascending °C x100
+ * breakpoints matching PredictionMarket.sol's `bucketThresholds` (N thresholds -> N+1 buckets). */
+export const BUCKET_TEMPLATES = [
+  { name: "Summer", thresholds: [2500, 2800, 3100, 3400], hint: "<25 / 25–28 / 28–31 / 31–34 / >34°C" },
+  { name: "Mild", thresholds: [1500, 2000, 2500, 3000], hint: "<15 / 15–20 / 20–25 / 25–30 / >30°C" },
+  { name: "Winter", thresholds: [0, 500, 1000, 1500], hint: "<0 / 0–5 / 5–10 / 10–15 / >15°C" },
+] as const;
 
 export const DURATION_PRESETS_HOURS = [
   { label: "1 hour", hours: 1 },

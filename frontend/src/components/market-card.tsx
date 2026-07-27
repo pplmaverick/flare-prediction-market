@@ -5,15 +5,24 @@ import { CloudRain, CurrencyCircleDollar, LockKey, TrendDown, TrendUp } from "@p
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/status-badge";
-import { useMarket, useNow, useBetCount } from "@/lib/hooks";
-import { decodeFeedSymbol, formatCoordinate, getMarketStatus, isPriceMarket } from "@/lib/market";
-import { formatCountdown, formatUnixTimestamp } from "@/lib/format";
+import { useMarket, useNow, useBetCount, usePayTokenAddress, useErc20Meta } from "@/lib/hooks";
+import {
+  bucketRangeLabel,
+  decodeFeedSymbol,
+  formatCoordinate,
+  getMarketStatus,
+  isPriceMarket,
+  isPriceUp,
+} from "@/lib/market";
+import { findCityName, formatCountdown, formatTokenAmount, formatUnixTimestamp } from "@/lib/format";
 
 export function MarketCard({ marketId }: { marketId: number }) {
   const { data: market, isLoading, isError } = useMarket(marketId);
   const now = useNow();
   // Hooks must run unconditionally, before the loading/error early-returns below.
   const { data: betCount } = useBetCount(marketId);
+  const { data: payToken } = usePayTokenAddress();
+  const { decimals: payDecimals, symbol: paySymbol } = useErc20Meta(payToken);
 
   if (isLoading) {
     return (
@@ -37,6 +46,11 @@ export function MarketCard({ marketId }: { marketId: number }) {
 
   const status = getMarketStatus(market, now);
   const isPrice = isPriceMarket(market);
+  const cityName = !isPrice ? findCityName(market.latitude, market.longitude) : undefined;
+  const totalPoolLabel =
+    payDecimals !== undefined
+      ? `${formatTokenAmount(market.totalPool, payDecimals)}${paySymbol ? ` ${paySymbol}` : ""}`
+      : undefined;
 
   return (
     <Link href={`/market/${marketId}`}>
@@ -51,7 +65,7 @@ export function MarketCard({ marketId }: { marketId: number }) {
                 Market #{marketId}
               </p>
               <p className="font-mono text-sm font-semibold text-foreground">
-                {isPrice ? decodeFeedSymbol(market.feedId) : "Rainfall"}
+                {isPrice ? decodeFeedSymbol(market.feedId) : (cityName ?? "Weather")}
               </p>
             </div>
           </div>
@@ -65,8 +79,8 @@ export function MarketCard({ marketId }: { marketId: number }) {
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Lat {formatCoordinate(market.latitude)}, Lon {formatCoordinate(market.longitude)} · triggers
-              if rainfall ≥ threshold
+              Lat {formatCoordinate(market.latitude)}, Lon {formatCoordinate(market.longitude)} ·{" "}
+              {market.bucketThresholds.length + 1} temperature buckets
             </p>
           )}
 
@@ -81,11 +95,29 @@ export function MarketCard({ marketId }: { marketId: number }) {
             </span>
           </div>
 
+          {totalPoolLabel && (
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Total pool</span>
+              <span className="font-mono tabular-nums text-foreground">{totalPoolLabel}</span>
+            </div>
+          )}
+
           {market.settled ? (
-            <Badge variant={market.outcome ? "accent" : "destructive"} className="w-fit">
-              {market.outcome ? <TrendUp size={12} weight="bold" /> : <TrendDown size={12} weight="bold" />}
-              Outcome: {market.outcome ? "Yes / Up" : "No / Down"}
-            </Badge>
+            isPrice ? (
+              <Badge variant={isPriceUp(market.winningBucket) ? "accent" : "destructive"} className="w-fit">
+                {isPriceUp(market.winningBucket) ? (
+                  <TrendUp size={12} weight="bold" />
+                ) : (
+                  <TrendDown size={12} weight="bold" />
+                )}
+                Outcome: {isPriceUp(market.winningBucket) ? "Yes / Up" : "No / Down"}
+              </Badge>
+            ) : (
+              <Badge variant="accent" className="w-fit">
+                <CloudRain size={12} weight="bold" />
+                {bucketRangeLabel(market.bucketThresholds, market.winningBucket)}
+              </Badge>
+            )
           ) : (
             <Badge variant="confidential" className="w-fit">
               <LockKey size={12} weight="bold" />

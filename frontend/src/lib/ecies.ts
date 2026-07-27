@@ -140,14 +140,15 @@ export async function eciesEncrypt(publicKey: TeePublicKey, plaintext: Uint8Arra
 }
 
 /**
- * ABI-encodes `(bool isUp, uint256 amount)` and ECIES-encrypts it against the
- * real tee-node's decryption scheme (see `eciesEncrypt` above) — the
- * plaintext shape `processPlaceBet` (fce-extension-scaffold's
- * internal/extension/extension.go) decodes after calling the TEE's own
- * `/decrypt` endpoint.
+ * ABI-encodes `(uint8 bucketIndex)` and ECIES-encrypts it against the real tee-node's decryption
+ * scheme (see `eciesEncrypt` above) — the plaintext shape `processPlaceBet`
+ * (fce-extension-scaffold's internal/extension/extension.go) decodes after calling the TEE's own
+ * `/decrypt` endpoint. The bet amount is no longer part of this ciphertext — it travels as a
+ * separate plaintext argument to PredictionMarket.placeBet() (see place-bet-dialog.tsx), since
+ * only the bucket choice needs to stay confidential. PRICE markets use bucket 0 = Down, 1 = Up.
  */
-export async function encryptBet(publicKey: TeePublicKey, isUp: boolean, amountWei: bigint): Promise<Hex> {
-  const plaintextHex = encodeAbiParameters([{ type: "bool" }, { type: "uint256" }], [isUp, amountWei]);
+export async function encryptBucketChoice(publicKey: TeePublicKey, bucketIndex: number): Promise<Hex> {
+  const plaintextHex = encodeAbiParameters([{ type: "uint8" }], [bucketIndex]);
   return eciesEncrypt(publicKey, hexToBytes(plaintextHex));
 }
 

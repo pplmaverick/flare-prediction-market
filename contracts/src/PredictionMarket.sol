@@ -82,8 +82,9 @@ contract PredictionMarket {
         uint256 startTimestamp;
         uint256 expirationTimestamp;
         bool settled;
-        bool outcome;              // PRICE: true = settled price > startPrice ("Up"). WEATHER: true = threshold triggered.
-        uint256 referenceValue;    // PRICE: settlement price read from FTSO. WEATHER: measured rain (mm x100).
+        uint8 winningBucket;       // PRICE: 1 = settled price > startPrice ("Up"), 0 = "Down". WEATHER: index into
+                                    // bucketThresholds (bucket i wins iff bucketThresholds[i-1] <= temp < bucketThresholds[i]).
+        int256 referenceValue;     // PRICE: settlement price read from FTSO. WEATHER: measured temperature (°C x100).
 
         // --- PRICE_MARKET fields ---
         bytes21 feedId;
@@ -92,7 +93,9 @@ contract PredictionMarket {
         // --- WEATHER_MARKET fields ---
         int256 latitude;
         int256 longitude;
-        uint256 rainThresholdMmE2; // payout side triggers iff measured precipitation (mm x100) >= this
+        int256[] bucketThresholds; // ascending °C x100 breakpoints; N thresholds define N+1 buckets
+        uint256[] bucketPools;     // per-bucket pool, filled in at settlement (bucketPools[winningBucket] = totalPool)
+        uint256 totalPool;         // sum of all bet amounts, accumulated in placeBet (plaintext; side stays encrypted)
     }
 
     /// @notice ABI payload of a SETTLE instruction — identical shape for both market types,
@@ -101,8 +104,8 @@ contract PredictionMarket {
     struct SettleMessage {
         uint256 marketId;
         address contractAddr;
-        bool outcome;
-        uint256 referenceValue;
+        uint8 winningBucket;
+        int256 referenceValue;
     }
 
     struct DepositMessage {
@@ -113,7 +116,9 @@ contract PredictionMarket {
     struct PlaceBetMessage {
         address bettor;
         uint256 marketId;
-        bytes encryptedBet; // ECIES ciphertext of ABI-encoded (bool isUp, uint256 amount), TEE public key
+        uint256 amount;     // plaintext bet size — feeds Market.totalPool directly, contract never learns the side
+        bytes encryptedBet; // ECIES ciphertext of ABI-encoded (uint8 bucketIndex) against the TEE public key
+                             // (PRICE markets use bucket 0 = Down, 1 = Up — same wire shape as WEATHER buckets)
     }
 
     Market[] public markets;
@@ -126,9 +131,9 @@ contract PredictionMarket {
     event TeeAddressSet(address indexed teeAddress);
     event MarketCreated(uint256 indexed marketId, MarketType marketType, uint256 expirationTimestamp);
     event DepositRequested(bytes32 indexed instructionId, address indexed depositor, uint256 amount);
-    event BetPlaced(bytes32 indexed instructionId, uint256 indexed marketId, address indexed bettor);
-    event SettlementRequested(uint256 indexed marketId, bytes32 instructionId, bool outcome, uint256 referenceValue);
-    event MarketSettled(uint256 indexed marketId, bool outcome, uint256 referenceValue);
+    event BetPlaced(bytes32 indexed instructionId, uint256 indexed marketId, address indexed bettor, uint256 amount);
+    event SettlementRequested(uint256 indexed marketId, bytes32 instructionId, uint8 winningBucket, int256 referenceValue);
+    event MarketSettled(uint256 indexed marketId, uint8 winningBucket, int256 referenceValue);
     event WithdrawRequested(bytes32 indexed instructionId, address indexed requester, uint256 amount, address to);
     event WithdrawalExecuted(bytes32 indexed withdrawalId, address indexed to, uint256 amount);
 
@@ -175,13 +180,20 @@ contract PredictionMarket {
 
     // --- Market creation ---
 
+    /// @notice Maximum number of bucket thresholds a WEATHER market may define. Keeps
+    /// `winningBucket` (uint8) from ever overflowing in `_resolveBucket` — 254 thresholds means
+    /// 255 buckets, far beyond any realistic temperature-range UI.
+    uint256 private constant MAX_BUCKET_THRESHOLDS = 254;
+
     /// @notice Create a market. `typeParams` is ABI-encoded per `marketType`:
     ///   PRICE   -> abi.encode(bytes21 feedId)
-    ///   WEATHER -> abi.encode(int256 latitude, int256 longitude, uint256 rainThresholdMmE2)
+    ///   WEATHER -> abi.encode(int256 latitude, int256 longitude, int256[] bucketThresholds)
     /// PRICE markets read their starting price from FTSO immediately, directly — no TEE
     /// round trip, since it's a free public view call with no additional trust to gain from
-    /// routing it through the TEE. WEATHER markets have no equivalent "start reading": rainfall
-    /// is only ever evaluated at settlement.
+    /// routing it through the TEE. WEATHER markets have no equivalent "start reading": temperature
+    /// is only ever evaluated at settlement, against `bucketThresholds` (ascending °C x100
+    /// breakpoints — N thresholds define N+1 buckets, e.g. [2500, 2800, 3100, 3400] -> <25 /
+    /// 25-28 / 28-31 / 31-34 / >34°C).
     function createMarket(
         MarketType marketType,
         bytes calldata typeParams,
@@ -202,10 +214,17 @@ contract PredictionMarket {
             m.feedId = feedId;
             m.startPrice = value;
         } else {
-            (int256 lat, int256 lon, uint256 rainThresholdMmE2) = abi.decode(typeParams, (int256, int256, uint256));
+            (int256 lat, int256 lon, int256[] memory bucketThresholds) =
+                abi.decode(typeParams, (int256, int256, int256[]));
+            require(bucketThresholds.length >= 2, "need at least 2 bucket thresholds");
+            require(bucketThresholds.length <= MAX_BUCKET_THRESHOLDS, "too many bucket thresholds");
+            for (uint256 i = 1; i < bucketThresholds.length; i++) {
+                require(bucketThresholds[i] > bucketThresholds[i - 1], "bucket thresholds must be strictly increasing");
+            }
             m.latitude = lat;
             m.longitude = lon;
-            m.rainThresholdMmE2 = rainThresholdMmE2;
+            m.bucketThresholds = bucketThresholds;
+            m.bucketPools = new uint256[](bucketThresholds.length + 1);
         }
 
         marketId = markets.length;
@@ -228,18 +247,23 @@ contract PredictionMarket {
     // --- Bet placement (on-chain instruction carrying ECIES ciphertext — fce-weather-insurance's
     //     buyPolicyPrivate pattern, not fce-orderbook's off-chain PLACE_ORDER; see contract header) ---
 
-    function placeBet(uint256 marketId, bytes calldata encryptedBet) external payable {
+    function placeBet(uint256 marketId, uint256 amount, bytes calldata encryptedBet) external payable {
         require(marketId < markets.length, "no such market");
+        require(amount > 0, "zero amount");
         require(encryptedBet.length > 0, "empty ciphertext");
         Market storage m = markets[marketId];
         require(block.timestamp < m.expirationTimestamp, "market closed");
         require(!m.settled, "already settled");
 
+        // Plaintext accumulation only — bucketPools stays untouched until settlement, since the
+        // contract never learns which bucket this bet chose (that's inside encryptedBet).
+        m.totalPool += amount;
+
         bytes memory message = abi.encode(
-            PlaceBetMessage({ bettor: msg.sender, marketId: marketId, encryptedBet: encryptedBet })
+            PlaceBetMessage({ bettor: msg.sender, marketId: marketId, amount: amount, encryptedBet: encryptedBet })
         );
         bytes32 instructionId = _sendInstruction(OP_COMMAND_PLACE_BET, message, msg.value);
-        emit BetPlaced(instructionId, marketId, msg.sender);
+        emit BetPlaced(instructionId, marketId, msg.sender, amount);
     }
 
     // --- Settlement: outcome resolution is market-type-specific and fully on-chain;
@@ -257,10 +281,12 @@ contract PredictionMarket {
         /* THIS IS A TEST METHOD, in production use: ContractRegistry.getFtsoV2() */
         TestFtsoV2Interface ftsoV2 = ContractRegistry.getTestFtsoV2();
         (uint256 endPrice,,) = ftsoV2.getFeedById(m.feedId);
-        bool outcomeUp = endPrice > m.startPrice;
+        uint8 winningBucket = endPrice > m.startPrice ? 1 : 0; // 1 = Up, 0 = Down
 
-        bytes32 instructionId = _requestSettlement(marketId, outcomeUp, endPrice);
-        emit SettlementRequested(marketId, instructionId, outcomeUp, endPrice);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        int256 endPriceSigned = int256(endPrice); // safe: FTSO prices are far below type(int256).max
+        bytes32 instructionId = _requestSettlement(marketId, winningBucket, endPriceSigned);
+        emit SettlementRequested(marketId, instructionId, winningBucket, endPriceSigned);
     }
 
     /// @notice Resolve a WEATHER market's outcome from an FDC Web2Json proof, verified on-chain
@@ -284,33 +310,48 @@ contract PredictionMarket {
         );
         require(dto.latitude == m.latitude && dto.longitude == m.longitude, "proof coordinates do not match market");
 
-        bool triggered = dto.rainMmE2 >= m.rainThresholdMmE2;
+        uint8 winningBucket = _resolveBucket(m.bucketThresholds, dto.temperatureCelsiusE2);
 
-        bytes32 instructionId = _requestSettlement(marketId, triggered, dto.rainMmE2);
-        emit SettlementRequested(marketId, instructionId, triggered, dto.rainMmE2);
+        bytes32 instructionId = _requestSettlement(marketId, winningBucket, dto.temperatureCelsiusE2);
+        emit SettlementRequested(marketId, instructionId, winningBucket, dto.temperatureCelsiusE2);
+    }
+
+    /// @notice Bucket i (1-indexed onward) wins iff thresholds[i-1] <= value < thresholds[i];
+    /// bucket 0 wins iff value < thresholds[0]; the last bucket wins iff value >= thresholds[N-1].
+    /// Thresholds are validated strictly increasing at createMarket time, so a single ascending
+    /// scan is sufficient.
+    function _resolveBucket(int256[] storage thresholds, int256 value) private view returns (uint8) {
+        uint8 bucket = 0;
+        uint256 n = thresholds.length;
+        for (uint256 i = 0; i < n; i++) {
+            if (value < thresholds[i]) break;
+            // forge-lint: disable-next-line(unsafe-typecast)
+            bucket = uint8(i + 1); // safe: i < n <= MAX_BUCKET_THRESHOLDS (254), enforced at createMarket
+        }
+        return bucket;
     }
 
     /// @dev Same OP_COMMAND_SETTLE message shape for both market types — see contract header.
-    function _requestSettlement(uint256 marketId, bool outcome, uint256 referenceValue) private returns (bytes32) {
+    function _requestSettlement(uint256 marketId, uint8 winningBucket, int256 referenceValue) private returns (bytes32) {
         bytes memory message = abi.encode(
-            SettleMessage({ marketId: marketId, contractAddr: address(this), outcome: outcome, referenceValue: referenceValue })
+            SettleMessage({ marketId: marketId, contractAddr: address(this), winningBucket: winningBucket, referenceValue: referenceValue })
         );
         return _sendInstruction(OP_COMMAND_SETTLE, message, msg.value);
     }
 
     /// @notice ABI-encoded shape expected in the OpenWeatherMap Web2Json `abiSignature` /
     /// postProcessJq output — mirrors flare-foundry-starter's WeatherIdAgency DTO, trimmed to
-    /// only the fields this contract checks (coordinates + measured precipitation).
+    /// only the fields this contract checks (coordinates + measured temperature).
     struct WeatherDataTransportObject {
         int256 latitude;
         int256 longitude;
-        uint256 rainMmE2;
+        int256 temperatureCelsiusE2;
     }
 
     /// @notice Finalize a PRICE market with the TEE-signed payout computation.
     /// @dev Verification scheme matches fce-weather-insurance's settle(): reconstruct
     /// ActionResult.Hash(), wrap with TEE_ACTION_RESULT_PREFIX + chainid, recover signer,
-    /// require it equals teeAddress. resultData decodes to (marketId, contractAddr, outcome,
+    /// require it equals teeAddress. resultData decodes to (marketId, contractAddr, winningBucket,
     /// referenceValue) echoed back from the SETTLE instruction — the payout math itself
     /// happened inside the TEE against its private bet ledger and is not re-derivable on-chain.
     function settlePriceMarket(
@@ -320,11 +361,11 @@ contract PredictionMarket {
         uint8 status,
         bytes calldata signature
     ) external {
-        (uint256 marketId, bool outcome, uint256 referenceValue) =
+        (uint256 marketId, uint8 winningBucket, int256 referenceValue) =
             _verifyAndDecodeSettleResult(resultData, actionId, submissionTag, status, signature);
         Market storage m = markets[marketId];
         require(m.marketType == MarketType.PRICE, "not a price market");
-        _finalizeMarket(marketId, m, outcome, referenceValue);
+        _finalizeMarket(marketId, m, winningBucket, referenceValue);
     }
 
     /// @notice Finalize a WEATHER market with the TEE-signed payout computation. Kept as a
@@ -338,11 +379,11 @@ contract PredictionMarket {
         uint8 status,
         bytes calldata signature
     ) external {
-        (uint256 marketId, bool outcome, uint256 referenceValue) =
+        (uint256 marketId, uint8 winningBucket, int256 referenceValue) =
             _verifyAndDecodeSettleResult(resultData, actionId, submissionTag, status, signature);
         Market storage m = markets[marketId];
         require(m.marketType == MarketType.WEATHER, "not a weather market");
-        _finalizeMarket(marketId, m, outcome, referenceValue);
+        _finalizeMarket(marketId, m, winningBucket, referenceValue);
     }
 
     function _verifyAndDecodeSettleResult(
@@ -351,7 +392,7 @@ contract PredictionMarket {
         string calldata submissionTag,
         uint8 status,
         bytes calldata signature
-    ) private view returns (uint256 marketId, bool outcome, uint256 referenceValue) {
+    ) private view returns (uint256 marketId, uint8 winningBucket, int256 referenceValue) {
         require(teeAddress != address(0), "TEE address not set");
         require(status == 1, "TEE reported failure");
 
@@ -363,17 +404,26 @@ contract PredictionMarket {
         require(signer == teeAddress, "bad TEE signature");
 
         address contractAddr;
-        (marketId, contractAddr, outcome, referenceValue) = abi.decode(resultData, (uint256, address, bool, uint256));
+        (marketId, contractAddr, winningBucket, referenceValue) =
+            abi.decode(resultData, (uint256, address, uint8, int256));
         require(contractAddr == address(this), "settlement not for this contract");
     }
 
-    function _finalizeMarket(uint256 marketId, Market storage m, bool outcome, uint256 referenceValue) private {
+    /// @dev For WEATHER markets, bucketPools stays all-zero until this point (the contract never
+    /// learns a bet's bucket choice pre-settlement) — settlement resolves it in one shot: the
+    /// winning bucket's pool becomes the entire totalPool. This is a display/accounting figure
+    /// only; actual fund movement still happens through the TEE-authorized withdraw flow.
+    function _finalizeMarket(uint256 marketId, Market storage m, uint8 winningBucket, int256 referenceValue) private {
         require(!m.settled, "already settled");
         require(block.timestamp >= m.expirationTimestamp, "market not expired");
         m.settled = true;
-        m.outcome = outcome;
+        m.winningBucket = winningBucket;
         m.referenceValue = referenceValue;
-        emit MarketSettled(marketId, outcome, referenceValue);
+        if (m.marketType == MarketType.WEATHER) {
+            require(winningBucket < m.bucketPools.length, "bucket out of range");
+            m.bucketPools[winningBucket] = m.totalPool;
+        }
+        emit MarketSettled(marketId, winningBucket, referenceValue);
     }
 
     // --- Withdraw: two-step TEE-authorized withdrawal (fce-orderbook pattern, unchanged

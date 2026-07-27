@@ -18,8 +18,8 @@ export default function Home() {
           </h1>
           <p className="mt-3 text-base text-muted-foreground">
             PRICE markets settle against live FTSO feeds; WEATHER markets settle against
-            FDC-verified rainfall data. Every bet is ECIES-encrypted client-side — its side and
-            amount stay confidential inside a TEE until settlement.
+            FDC-verified temperature data across custom °C buckets. Every bet&apos;s side is
+            ECIES-encrypted client-side and stays confidential inside a TEE until settlement.
           </p>
         </div>
         <div className="flex shrink-0 gap-3">

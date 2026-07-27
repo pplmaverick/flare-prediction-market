@@ -5,11 +5,15 @@ out = "out"
 libs = ["dependencies"]
 solc = "0.8.27"
 evm_version = "cancun"
+optimizer = true
+optimizer_runs = 100
+fs_permissions = [{ access = "read-write", path = "./script/fdc/data" }]
 
 [dependencies]
 forge-std = "1.9.5"
 "@openzeppelin-contracts" = "5.2.0-rc.1"
 flare-periphery = "0.1.37"
+surl = { version = "0.0.0", git = "https://github.com/memester-xyz/surl.git", rev = "034c912ae9b5e707a5afd21f145b452ad8e800df" }
 
 [soldeer]
 remappings_generate = true

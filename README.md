@@ -16,8 +16,8 @@ feed swapped in.
 |---|---|
 | Network | Flare Coston2 Testnet |
 | Chain ID | 114 |
-| Contract | `0x072A3A0C04Cf8CDcaf5B4A73a4Ed4fF5A841531f` |
-| Explorer | [View Contract](https://coston2-explorer.flare.network/address/0x072A3A0C04Cf8CDcaf5B4A73a4Ed4fF5A841531f) |
+| Contract | `0x9C22c9F1954f2E1D7B305c0E2932edEBE713bDc3` |
+| Explorer | [View Contract](https://coston2-explorer.flare.network/address/0x9C22c9F1954f2E1D7B305c0E2932edEBE713bDc3) |
 
 ---
 
@@ -117,7 +117,7 @@ balances live in TEE memory. Withdrawals execute against a TEE signature over
 
 | Contract | Address |
 |---|---|
-| PredictionMarket | `0x072A3A0C04Cf8CDcaf5B4A73a4Ed4fF5A841531f` |
+| PredictionMarket | `0x9C22c9F1954f2E1D7B305c0E2932edEBE713bDc3` |
 | FlareTeeManager *(shared Flare infra — TeeExtensionRegistry + TeeMachineRegistry)* | `0x1a9C4A0f9D76c0b1D91d22E24E573a9b377618aE` |
 
 ---

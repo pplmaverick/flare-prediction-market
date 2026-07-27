@@ -5,7 +5,7 @@ import { predictionMarketAbi } from "./prediction-market-abi";
 // Overridable via env for redeploys without touching code.
 export const PREDICTION_MARKET_ADDRESS = (process.env
   .NEXT_PUBLIC_PREDICTION_MARKET_ADDRESS ??
-  "0x072A3A0C04Cf8CDcaf5B4A73a4Ed4fF5A841531f") as Address;
+  "0x9C22c9F1954f2E1D7B305c0E2932edEBE713bDc3") as Address;
 
 export const predictionMarketContract = {
   address: PREDICTION_MARKET_ADDRESS,

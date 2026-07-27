@@ -7,13 +7,16 @@ import { useAccount, useWaitForTransactionReceipt, useWriteContract } from "wagm
 import { CloudRain, CurrencyCircleDollar, PlusCircle } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { predictionMarketContract, MarketType } from "@/lib/contract";
-import { COMMON_FEEDS, encodeFeedId } from "@/lib/format";
+import { COMMON_FEEDS, DURATION_PRESETS_HOURS, RAIN_THRESHOLD_PRESETS_MM, WEATHER_CITIES, encodeFeedId } from "@/lib/format";
 import { useToast } from "@/components/use-toast";
 import { getFriendlyErrorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
+
+const CUSTOM_CITY = "custom";
 
 export default function CreateMarketPage() {
   const { isConnected } = useAccount();
@@ -23,10 +26,23 @@ export default function CreateMarketPage() {
   const [marketKind, setMarketKind] = React.useState<"PRICE" | "WEATHER">("PRICE");
   const [feed, setFeed] = React.useState<string>(COMMON_FEEDS[0]);
   const [customFeed, setCustomFeed] = React.useState("");
-  const [latitude, setLatitude] = React.useState("");
-  const [longitude, setLongitude] = React.useState("");
+  const [city, setCity] = React.useState<string>(WEATHER_CITIES[0].name);
+  const [latitude, setLatitude] = React.useState(String(WEATHER_CITIES[0].lat));
+  const [longitude, setLongitude] = React.useState(String(WEATHER_CITIES[0].lon));
   const [rainThreshold, setRainThreshold] = React.useState("");
   const [durationHours, setDurationHours] = React.useState("24");
+
+  function handleCityChange(name: string) {
+    setCity(name);
+    const preset = WEATHER_CITIES.find((c) => c.name === name);
+    if (preset) {
+      setLatitude(String(preset.lat));
+      setLongitude(String(preset.lon));
+    } else {
+      setLatitude("");
+      setLongitude("");
+    }
+  }
 
   const { writeContract, data: hash, isPending } = useWriteContract();
   const receipt = useWaitForTransactionReceipt({ hash });
@@ -167,25 +183,94 @@ export default function CreateMarketPage() {
             </TabsContent>
 
             <TabsContent value="WEATHER" className="flex flex-col gap-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label htmlFor="lat">Latitude</Label>
-                  <Input id="lat" type="number" step="any" placeholder="25.033" value={latitude} onChange={(e) => setLatitude(e.target.value)} className="mt-2" />
-                </div>
-                <div>
-                  <Label htmlFor="lon">Longitude</Label>
-                  <Input id="lon" type="number" step="any" placeholder="121.565" value={longitude} onChange={(e) => setLongitude(e.target.value)} className="mt-2" />
-                </div>
+              <div>
+                <Label htmlFor="city">Location</Label>
+                <Select
+                  id="city"
+                  className="mt-2"
+                  value={city}
+                  onValueChange={handleCityChange}
+                  options={[
+                    ...WEATHER_CITIES.map((c) => ({ value: c.name, label: c.name })),
+                    { value: CUSTOM_CITY, label: "Custom..." },
+                  ]}
+                />
+                {city === CUSTOM_CITY ? (
+                  <div className="mt-2 grid grid-cols-2 gap-3">
+                    <div>
+                      <Label htmlFor="lat">Latitude</Label>
+                      <Input
+                        id="lat"
+                        type="number"
+                        step="any"
+                        placeholder="25.033"
+                        value={latitude}
+                        onChange={(e) => setLatitude(e.target.value)}
+                        className="mt-2"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="lon">Longitude</Label>
+                      <Input
+                        id="lon"
+                        type="number"
+                        step="any"
+                        placeholder="121.565"
+                        value={longitude}
+                        onChange={(e) => setLongitude(e.target.value)}
+                        className="mt-2"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Coordinates: {latitude}, {longitude}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="rain">Rain threshold (mm)</Label>
-                <Input id="rain" type="number" step="any" placeholder="10" value={rainThreshold} onChange={(e) => setRainThreshold(e.target.value)} className="mt-2" />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Bet YES if rainfall exceeds this amount during the market period
+                </p>
+                <Input
+                  id="rain"
+                  type="number"
+                  step="any"
+                  placeholder="10"
+                  value={rainThreshold}
+                  onChange={(e) => setRainThreshold(e.target.value)}
+                  className="mt-2"
+                />
+                <div className="mt-2 flex gap-2">
+                  {RAIN_THRESHOLD_PRESETS_MM.map((mm) => (
+                    <button
+                      key={mm}
+                      type="button"
+                      onClick={() => setRainThreshold(String(mm))}
+                      className={cn(
+                        "cursor-pointer rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+                        rainThreshold === String(mm)
+                          ? "border-primary/40 bg-primary/10 text-primary"
+                          : "border-border-strong bg-surface-raised text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {mm}mm
+                    </button>
+                  ))}
+                </div>
               </div>
             </TabsContent>
 
             <div className="mt-2">
-              <Label htmlFor="duration">Duration (hours)</Label>
-              <Input id="duration" type="number" min="1" step="1" value={durationHours} onChange={(e) => setDurationHours(e.target.value)} className="mt-2" />
+              <Label htmlFor="duration">Duration</Label>
+              <Select
+                id="duration"
+                className="mt-2"
+                value={durationHours}
+                onValueChange={setDurationHours}
+                options={DURATION_PRESETS_HOURS.map((d) => ({ value: String(d.hours), label: d.label }))}
+              />
             </div>
 
             <Button size="lg" className="mt-5 w-full" disabled={!isConnected || busy} onClick={handleSubmit}>

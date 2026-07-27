@@ -60,3 +60,22 @@ export function encodeFeedId(symbol: string, category = 0x01): `0x${string}` {
 }
 
 export const COMMON_FEEDS = ["BTC/USD", "ETH/USD", "FLR/USD", "XRP/USD"] as const;
+
+export const WEATHER_CITIES = [
+  { name: "Taipei", lat: 25.033, lon: 121.565 },
+  { name: "Tokyo", lat: 35.689, lon: 139.692 },
+  { name: "New York", lat: 40.713, lon: -74.006 },
+  { name: "Seoul", lat: 37.566, lon: 126.978 },
+  { name: "Bangkok", lat: 13.756, lon: 100.502 },
+  { name: "London", lat: 51.507, lon: -0.128 },
+] as const;
+
+export const RAIN_THRESHOLD_PRESETS_MM = [1, 5, 10, 25] as const;
+
+export const DURATION_PRESETS_HOURS = [
+  { label: "1 hour", hours: 1 },
+  { label: "6 hours", hours: 6 },
+  { label: "24 hours", hours: 24 },
+  { label: "3 days", hours: 72 },
+  { label: "7 days", hours: 168 },
+] as const;

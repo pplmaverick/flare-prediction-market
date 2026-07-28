@@ -137,10 +137,15 @@ library Base {
         require(bytes(daLayerUrl).length > 0, "COSTON2_DA_LAYER_URL env var not set");
 
         string[] memory headers = prepareHeaders(vm.envString("X_API_KEY"));
+        // votingRoundId is deliberately omitted: FDC's collection-window mechanic means a
+        // request submitted during round N is actually voted into round N's Merkle tree one
+        // round later (confirmed empirically 2026-07-28 — round computed at submission time had
+        // no Web2Json leaf, round+1 did), so pinning to the submission-time round here is
+        // unreliable. requestBytes alone is unique per request (the FdcHub embeds the caller's
+        // salt), and the DA Layer's own schema says omitting votingRoundId fetches "the latest
+        // matching proof" instead — that's the round-agnostic and correct behavior here.
         string memory body = string.concat(
-            '{"votingRoundId":',
-            Strings.toString(votingRoundId),
-            ',"requestBytes":"',
+            '{"requestBytes":"',
             requestBytesHex,
             '"}'
         );

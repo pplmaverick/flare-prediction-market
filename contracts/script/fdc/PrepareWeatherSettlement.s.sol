@@ -13,17 +13,28 @@ string constant sourceName = "PublicWeb2";
 address constant PREDICTION_MARKET_ADDRESS = 0x9C22c9F1954f2E1D7B305c0E2932edEBE713bDc3;
 
 // jq filter producing PredictionMarket.WeatherDataTransportObject's field shape
-// (latitude, longitude, temperatureCelsiusE2), in that order. Uses `round` (not `floor`) to
-// match frontend/src/app/create/page.tsx's `Math.round(x * 1e6)` / `Math.round(x * 100)`
+// (latitude, longitude, temperatureCelsiusE2), in that order. Wants `round` semantics (not
+// `floor`) to match frontend/src/app/create/page.tsx's `Math.round(x * 1e6)` / `Math.round(x *
+// 100)`
 // encoding — floor would round a value like -80.1918 down to the wrong integer whenever
 // floating-point arithmetic lands a hair below the true multiple (e.g. -80191800.000001 ->
 // -80191801). `.main.temp` is Kelvin (queryParams below requests `units=standard`, OpenWeatherMap's
 // explicit Kelvin mode rather than relying on the API's undocumented no-units-param default) —
 // subtracting 273.15 before scaling gives signed Celsius x100, so winter buckets below 0°C decode
 // correctly (Market.referenceValue / WeatherDataTransportObject.temperatureCelsiusE2 are int256).
+//
+// The Verifier's jq engine is a restricted subset (confirmed via direct API probing 2026-07-28)
+// that rejects `round`/`floor`/`ceil`/`as $x |` with "INVALID: INVALID JQ FILTER" — no math
+// builtins, no variable binding. Round-half-away-from-zero is hand-rolled instead: add/subtract
+// 0.5 by sign, then truncate via tostring/split(".")[0]/tonumber (string-split truncation is
+// sign-correct without needing a truncation builtin). The literal `"` in `split(".")` is written
+// as `\\"` below (matching ABI_SIGNATURE's escaping just below) because this constant gets
+// spliced as-is into the `postProcessJq` JSON string value in _prepareApiRequestBody — an
+// unescaped `"` there breaks the outer request JSON (confirmed: verifier returned HTTP 400
+// "Bad Request" / JSON parse error before this fix).
 string constant POST_PROCESS_JQ =
     // solhint-disable-next-line max-line-length
-    '{latitude: (.coord.lat*1000000|round), longitude: (.coord.lon*1000000|round), temperatureCelsiusE2: ((.main.temp-273.15)*100|round)}';
+    '{latitude: ((if (.coord.lat*1000000) >= 0 then (.coord.lat*1000000 + 0.5) else (.coord.lat*1000000 - 0.5) end) | tostring | split(\\".\\")[0] | tonumber), longitude: ((if (.coord.lon*1000000) >= 0 then (.coord.lon*1000000 + 0.5) else (.coord.lon*1000000 - 0.5) end) | tostring | split(\\".\\")[0] | tonumber), temperatureCelsiusE2: ((if ((.main.temp-273.15)*100) >= 0 then ((.main.temp-273.15)*100 + 0.5) else ((.main.temp-273.15)*100 - 0.5) end) | tostring | split(\\".\\")[0] | tonumber)}';
 
 // ABI signature matching PredictionMarket.WeatherDataTransportObject exactly (field
 // names/order/types) — the FDC verifier ABI-encodes the postProcessJq output per this shape.

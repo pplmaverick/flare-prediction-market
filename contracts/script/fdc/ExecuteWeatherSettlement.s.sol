@@ -22,9 +22,11 @@ address constant PREDICTION_MARKET_ADDRESS = 0x9C22c9F1954f2E1D7B305c0E2932edEBE
 ///        --rpc-url coston2 --broadcast --ffi
 contract ExecuteWeatherSettlement is Script {
     /// @notice TEE instruction fee forwarded with the call (see
-    /// finalize-settlement-panel.tsx's "Network fee (C2FLR)" field, which also defaults to 0).
-    /// Bump this if the TeeExtensionRegistry starts requiring a nonzero fee.
-    uint256 internal constant TEE_INSTRUCTION_FEE = 0;
+    /// finalize-settlement-panel.tsx's "Network fee (C2FLR)" field, which defaults to 0.05).
+    /// Confirmed 2026-07-28: the TeeExtensionRegistry does require a nonzero fee — 0 reverts
+    /// with custom error 0x732f9413 (FeeTooLow), matching the deposit()/placeBet() gotcha
+    /// documented in the root README's Implementation Notes.
+    uint256 internal constant TEE_INSTRUCTION_FEE = 0.05 ether;
 
     function run() external {
         string memory requestHex = vm.readLine(

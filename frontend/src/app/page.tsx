@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChartLineUp as ChartLineUpSsr, LockKey, PlusCircle } from "@phosphor-icons/react/dist/ssr";
+import { LockKey, PlusCircle } from "@phosphor-icons/react/dist/ssr";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MarketGrid } from "@/components/market-grid";
@@ -36,10 +36,6 @@ export default function Home() {
       </section>
 
       <section>
-        <div className="mb-4 flex items-center gap-2">
-          <ChartLineUpSsr size={18} className="text-primary" />
-          <h2 className="text-lg font-semibold text-foreground">Markets</h2>
-        </div>
         <MarketGrid />
       </section>
     </div>

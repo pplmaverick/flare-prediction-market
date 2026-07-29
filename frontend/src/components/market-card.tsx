@@ -13,10 +13,17 @@ import {
   getMarketStatus,
   isPriceMarket,
   isPriceUp,
+  type MarketTypeFilter,
 } from "@/lib/market";
 import { findCityName, formatCountdown, formatTokenAmount, formatUnixTimestamp } from "@/lib/format";
 
-export function MarketCard({ marketId }: { marketId: number }) {
+export function MarketCard({
+  marketId,
+  typeFilter = "all",
+}: {
+  marketId: number;
+  typeFilter?: MarketTypeFilter;
+}) {
   const { data: market, isLoading, isError } = useMarket(marketId);
   const now = useNow();
   // Hooks must run unconditionally, before the loading/error early-returns below.
@@ -44,8 +51,11 @@ export function MarketCard({ marketId }: { marketId: number }) {
     );
   }
 
-  const status = getMarketStatus(market, now);
   const isPrice = isPriceMarket(market);
+  if (typeFilter === "price" && !isPrice) return null;
+  if (typeFilter === "weather" && isPrice) return null;
+
+  const status = getMarketStatus(market, now);
   const cityName = !isPrice ? findCityName(market.latitude, market.longitude) : undefined;
   const totalPoolLabel =
     payDecimals !== undefined

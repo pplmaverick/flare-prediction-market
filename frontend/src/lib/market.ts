@@ -18,6 +18,8 @@ export interface MarketData {
 
 export type MarketStatus = "open" | "awaiting_settlement" | "settled";
 
+export type MarketTypeFilter = "all" | "price" | "weather";
+
 export function getMarketStatus(market: MarketData, nowSeconds: number): MarketStatus {
   if (market.settled) return "settled";
   if (nowSeconds >= Number(market.expirationTimestamp)) return "awaiting_settlement";

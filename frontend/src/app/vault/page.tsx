@@ -1,8 +1,9 @@
 "use client";
 
-import { Vault as VaultIcon, LockKey } from "@phosphor-icons/react";
+import { Vault as VaultIcon, LockKey, Warning } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DepositPanel } from "@/components/deposit-panel";
 import { WithdrawPanel } from "@/components/withdraw-panel";
@@ -17,12 +18,7 @@ export default function VaultPage() {
   const { data: vaultBalance, isLoading: isBalanceLoading } = useVaultBalance(address);
 
   const balanceReady = !isBalanceLoading && vaultBalance !== undefined && decimals !== undefined;
-  const estimatedBalance =
-    balanceReady && vaultBalance
-      ? vaultBalance.deposited - vaultBalance.withdrawn > 0n
-        ? vaultBalance.deposited - vaultBalance.withdrawn
-        : 0n
-      : undefined;
+  const isEstimated = vaultBalance?.source === "estimated";
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
@@ -40,10 +36,28 @@ export default function VaultPage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>Manage Balance</CardTitle>
-            <Badge variant="confidential">
-              <LockKey size={12} weight="bold" />
-              Balance held privately by TEE
-            </Badge>
+            {balanceReady && isEstimated ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Badge variant="warning">
+                      <Warning size={12} weight="bold" />
+                      Estimated (TEE offline)
+                    </Badge>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  The TEE balance API is unreachable, so this is an on-chain estimate
+                  (deposited − withdrawn). Locked/active-bet amounts aren&apos;t visible
+                  from on-chain data alone and are shown as 0 until the TEE is back.
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <Badge variant="confidential">
+                <LockKey size={12} weight="bold" />
+                Balance held privately by TEE
+              </Badge>
+            )}
           </div>
           <CardDescription>
             This contract only custodies the pooled token total. Your individual
@@ -55,16 +69,27 @@ export default function VaultPage() {
             <p className="text-sm text-muted-foreground">Connect your wallet to continue.</p>
           ) : (
             <Tabs defaultValue="deposit">
-              <div className="mb-5 text-sm">
-                {estimatedBalance !== undefined ? (
-                  <>
-                    <p className="text-foreground">
-                      Estimated balance: {formatTokenAmount(estimatedBalance, decimals ?? 18)} {symbol ?? ""}
-                    </p>
-                    <p className="text-xs text-muted-foreground">(actual may differ due to active bets)</p>
-                  </>
+              <div className="mb-5 space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {isEstimated ? "Estimated Balance" : "TEE Balance"}
+                </p>
+                {balanceReady && vaultBalance ? (
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-lg border border-border bg-surface-raised px-3 py-2.5">
+                      <p className="text-xs text-muted-foreground">Available</p>
+                      <p className="font-medium text-foreground">
+                        {formatTokenAmount(vaultBalance.available, decimals ?? 18)} {symbol ?? ""}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-border bg-surface-raised px-3 py-2.5">
+                      <p className="text-xs text-muted-foreground">Locked</p>
+                      <p className="font-medium text-foreground">
+                        {formatTokenAmount(vaultBalance.locked, decimals ?? 18)} {symbol ?? ""}
+                      </p>
+                    </div>
+                  </div>
                 ) : (
-                  <p className="text-muted-foreground">Loading balance...</p>
+                  <p className="text-sm text-muted-foreground">Loading balance...</p>
                 )}
               </div>
               <TabsList className="mb-5">

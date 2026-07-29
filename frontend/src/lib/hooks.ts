@@ -62,13 +62,47 @@ export function useUserBet(marketId: number, address: Address | undefined) {
   });
 }
 
-/** Estimated vault balance for this wallet (deposited - withdrawn), derived from Blockscout
- * logs — an estimate only, since active bets are tracked privately in TEE memory and aren't
- * reflected here. */
+export interface VaultBalance {
+  available: bigint;
+  locked: bigint;
+  source: "tee" | "estimated";
+}
+
+interface TeeBalanceResponse {
+  available?: string;
+  locked?: string;
+  fallback?: boolean;
+}
+
+/** Hits the TEE's own /balance API (via the Next API route, to avoid CORS) — returns null on
+ * any failure (network error, non-2xx, TEE offline) so the caller can fall back. */
+async function fetchTeeBalance(address: Address): Promise<TeeBalanceResponse | null> {
+  try {
+    const res = await fetch(`/api/tee/balance?address=${address}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    return (await res.json()) as TeeBalanceResponse;
+  } catch {
+    return null;
+  }
+}
+
+/** Vault balance for this wallet. Tries the TEE's own /balance API first — the real,
+ * privately-tracked available/locked figures. Falls back to the Blockscout-derived
+ * deposited-minus-withdrawn estimate (source: "estimated") if the TEE is unreachable; that
+ * estimate can't see locked/in-flight bet amounts, so locked is reported as 0 in that case. */
 export function useVaultBalance(address: Address | undefined) {
-  return useQuery({
+  return useQuery<VaultBalance>({
     queryKey: ["vault-balance", address],
-    queryFn: () => fetchVaultBalance(address as Address),
+    queryFn: async () => {
+      const tee = await fetchTeeBalance(address as Address);
+      if (tee && !tee.fallback && tee.available !== undefined && tee.locked !== undefined) {
+        return { available: BigInt(tee.available), locked: BigInt(tee.locked), source: "tee" };
+      }
+
+      const { deposited, withdrawn } = await fetchVaultBalance(address as Address);
+      const available = deposited - withdrawn > 0n ? deposited - withdrawn : 0n;
+      return { available, locked: 0n, source: "estimated" };
+    },
     enabled: !!address,
     staleTime: 15_000,
   });

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import express from 'express';
 import { AbiCoder, Wallet, keccak256, getBytes, toUtf8Bytes, concat } from 'ethers';
 import * as eccrypto from 'eccrypto';
 import type { Ecies } from 'eccrypto';
@@ -88,6 +89,20 @@ interface Bet {
 }
 const betLedger = new Map<string, Bet[]>();
 
+// --- in-memory user balance ledger ---------------------------------------
+interface UserBalance {
+  available: bigint;
+  locked: bigint;
+}
+const balanceLedger = new Map<string, UserBalance>();
+
+function getBalance(address: string): UserBalance {
+  return balanceLedger.get(address.toLowerCase()) ?? { available: 0n, locked: 0n };
+}
+function setBalance(address: string, bal: UserBalance): void {
+  balanceLedger.set(address.toLowerCase(), bal);
+}
+
 // --- ActionResult signing ---------------------------------------------------
 // Mirrors tee-node's types.ActionResult.Hash():
 //   keccak256( keccak256(Data) || ID || keccak256(SubmissionTag) || Status )
@@ -142,12 +157,19 @@ async function postResult(result: ActionResult): Promise<void> {
   }
 }
 
-function buildResult(action: any, opType: string, opCommand: string, dataHex: string): ActionResult {
+function buildResult(
+  action: any,
+  opType: string,
+  opCommand: string,
+  dataHex: string,
+  status = 1,
+  log = 'ok'
+): ActionResult {
   return {
     id: action.data.id,
     submissionTag: action.data.submissionTag,
-    status: 1,
-    log: 'ok',
+    status,
+    log,
     opType,
     opCommand,
     additionalResultStatus: '0x',
@@ -222,6 +244,9 @@ async function handlePredictionMarket(
   if (sameHash(opCommand, OP_DEPOSIT)) {
     const [depositor, amount] = abiCoder.decode(['address', 'uint256'], messageHex);
     console.log(`[DEPOSIT] depositor=${depositor} amount=${amount.toString()}`);
+    const bal = getBalance(depositor);
+    bal.available += amount;
+    setBalance(depositor, bal);
     await postResult(buildResult(action, OP_PREDICTION_MARKET, opCommand, '0x'));
     return;
   }
@@ -238,6 +263,21 @@ async function handlePredictionMarket(
     console.log(
       `[PLACE_BET] market=${marketId} bettor=${bettor} isUp=${isUp} amount=${amount.toString()}`
     );
+
+    const bal = getBalance(bettor);
+    if (bal.available < amount) {
+      console.warn(
+        `[PLACE_BET] rejected: bettor=${bettor} available=${bal.available} amount=${amount}`
+      );
+      await postResult(
+        buildResult(action, OP_PREDICTION_MARKET, opCommand, '0x', 0, 'insufficient available balance')
+      );
+      return;
+    }
+    bal.available -= amount;
+    bal.locked += amount;
+    setBalance(bettor, bal);
+
     const key = marketId.toString();
     const bets = betLedger.get(key) ?? [];
     bets.push({ bettor, isUp, amount: amount.toString() });
@@ -255,9 +295,26 @@ async function handlePredictionMarket(
     console.log(
       `[SETTLE] market=${marketId} outcome=${outcome} referenceValue=${referenceValue} bets=${bets.length}`
     );
-    // Payout math over `bets` is not wired up yet — this proves the
-    // sign-and-return path; resultData mirrors what settlePriceMarket()/
-    // settleWeatherMarket() expect to decode.
+
+    let totalPool = 0n;
+    let winnerPool = 0n;
+    for (const bet of bets) {
+      const amount = BigInt(bet.amount);
+      totalPool += amount;
+      if (bet.isUp === outcome) winnerPool += amount;
+    }
+    // winnerPool can be 0 (no bets landed on the winning side) — skip payout
+    // division in that case; losers' locked amounts still get released below.
+    for (const bet of bets) {
+      const amount = BigInt(bet.amount);
+      const bal = getBalance(bet.bettor);
+      bal.locked -= amount;
+      if (bet.isUp === outcome && winnerPool > 0n) {
+        bal.available += (amount * totalPool) / winnerPool;
+      }
+      setBalance(bet.bettor, bal);
+    }
+
     const resultData = abiCoder.encode(
       ['uint256', 'bool', 'uint256'],
       [marketId, outcome, referenceValue]
@@ -272,6 +329,20 @@ async function handlePredictionMarket(
       messageHex
     );
     console.log(`[WITHDRAW] requester=${requester} amount=${amount.toString()} to=${to}`);
+
+    const bal = getBalance(requester);
+    if (bal.available < amount) {
+      console.warn(
+        `[WITHDRAW] rejected: requester=${requester} available=${bal.available} amount=${amount}`
+      );
+      await postResult(
+        buildResult(action, OP_PREDICTION_MARKET, opCommand, '0x', 0, 'insufficient available balance')
+      );
+      return;
+    }
+    bal.available -= amount;
+    setBalance(requester, bal);
+
     await postResult(buildResult(action, OP_PREDICTION_MARKET, opCommand, '0x'));
     return;
   }
@@ -348,6 +419,35 @@ setInterval(() => {
 setInterval(() => {
   pollQueue('main').catch((err) => console.error('[poll:main] unexpected error:', err));
 }, POLL_INTERVAL_MS);
+
+// --- HTTP API (balance query) -----------------------------------------------
+// Unauthenticated by design for now — any caller who knows an address can
+// read its available/locked balance. Deposit/withdraw amounts and bet
+// direction are already public on-chain via events, so this doesn't expose
+// materially new information, but it is the first place the live netted
+// available/locked figure itself becomes queryable.
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const HTTP_PORT = 3002;
+
+const app = express();
+
+app.get('/balance', (req, res) => {
+  const address = req.query.address;
+  if (typeof address !== 'string' || !ADDRESS_RE.test(address)) {
+    res.status(400).json({ error: 'address query param must be a 0x-prefixed 20-byte address' });
+    return;
+  }
+  const bal = getBalance(address);
+  res.json({
+    address: address.toLowerCase(),
+    available: bal.available.toString(),
+    locked: bal.locked.toString(),
+  });
+});
+
+app.listen(HTTP_PORT, () => {
+  console.log(`[simulated-tee] balance API listening on port ${HTTP_PORT}`);
+});
 
 console.log('[simulated-tee] polling proxy at', PROXY_INTERNAL);
 console.log('[simulated-tee] public key X:', pubKeyX);

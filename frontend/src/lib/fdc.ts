@@ -73,22 +73,21 @@ export interface WeatherProof {
   data: Web2JsonResponse;
 }
 
-/** Single poll attempt against the DA Layer's `/api/v1/fdc/proof-by-request-round-raw` endpoint
- * (schema confirmed against its live OpenAPI spec: `AttestationResultRawV1` — top-level
- * `response_hex` / `attestation_type` / `proof` fields). Returns null while the round hasn't
- * been indexed yet (mirrors contracts/script/fdc/Base.s.sol's retrieveProof: absent response_hex
- * = not ready); throws only on a missing config. `votingRoundId` is deliberately never sent —
- * Base.s.sol's comment explains why: a request submitted in round N actually lands in round
- * N+1's Merkle tree, so pinning to the submission-time round is unreliable, and omitting it lets
- * the DA Layer return "the latest matching proof" instead. */
+/** Single poll attempt against the DA Layer's `/api/v1/fdc/proof-by-request-round-raw` endpoint,
+ * via this app's `/api/fdc/proof` route (schema confirmed against the DA Layer's live OpenAPI
+ * spec: `AttestationResultRawV1` — top-level `response_hex` / `attestation_type` / `proof`
+ * fields). Proxied server-side rather than called directly — the DA Layer doesn't send CORS
+ * headers for browser-origin requests, so a direct fetch fails immediately with a bare "Failed
+ * to fetch" (no HTTP status, not retried). Returns null while the round hasn't been indexed yet
+ * (mirrors contracts/script/fdc/Base.s.sol's retrieveProof: absent response_hex = not ready).
+ * `votingRoundId` is deliberately never sent — Base.s.sol's comment explains why: a request
+ * submitted in round N actually lands in round N+1's Merkle tree, so pinning to the
+ * submission-time round is unreliable, and omitting it lets the DA Layer return "the latest
+ * matching proof" instead. */
 export async function pollWeatherProof(abiEncodedRequest: Hex): Promise<WeatherProof | null> {
-  const daLayerUrl = process.env.NEXT_PUBLIC_DA_LAYER_URL;
-  const daLayerApiKey = process.env.NEXT_PUBLIC_DA_LAYER_API_KEY;
-  if (!daLayerUrl) throw new Error("NEXT_PUBLIC_DA_LAYER_URL is not configured");
-
-  const res = await fetch(`${daLayerUrl.replace(/\/$/, "")}/api/v1/fdc/proof-by-request-round-raw`, {
+  const res = await fetch("/api/fdc/proof", {
     method: "POST",
-    headers: { "X-API-KEY": daLayerApiKey ?? "", "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ requestBytes: abiEncodedRequest }),
   });
 

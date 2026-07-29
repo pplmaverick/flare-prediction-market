@@ -43,13 +43,32 @@ export function WithdrawPanel() {
           // deriving state from props/state.
           // eslint-disable-next-line react-hooks/set-state-in-effect
           setWithdrawalId(args.instructionId);
+          if (address) {
+            localStorage.setItem(`withdrawal-id-${address}`, args.instructionId);
+          }
           toast({ title: "Withdrawal requested", description: `Instruction ID: ${args.instructionId}` });
         }
       } catch {
         // not the event we're looking for
       }
     }
-  }, [requestReceipt.data, toast]);
+  }, [requestReceipt.data, address, toast]);
+
+  // Pre-fills withdrawalId from a prior session's withdraw request for this wallet, so a page
+  // reload doesn't lose the instruction ID needed for step 2. Mount-only by design (same pattern
+  // as FinalizeSettlementPanel); guarded on address since useAccount() resolves the connected
+  // wallet asynchronously and may still be undefined at this component's first render.
+  React.useEffect(() => {
+    if (!address) return;
+    const stored = localStorage.getItem(`withdrawal-id-${address}`);
+    if (stored && !withdrawalId) {
+      // Reacting to localStorage (an external system) on mount, not deriving state from
+      // props/state.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setWithdrawalId(stored);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   React.useEffect(() => {
     if (executeReceipt.isSuccess) {

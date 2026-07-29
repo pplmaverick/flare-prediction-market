@@ -7,5 +7,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
+      - name: Install dependencies
+        run: cd contracts && forge soldeer install
       - name: Run tests
         run: cd contracts && forge test

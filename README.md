@@ -1,5 +1,18 @@
 # Flare Prediction Market
 
+## 🚀 Live Demo
+
+| Resource | Link |
+|----------|------|
+| **Frontend** | https://flare-prediction-market.vercel.app |
+| **TEE Proxy** | https://flare-tee.idolpulse.com |
+| **Contract (Coston2)** | [0x9C22c9F1954f2E1D7B305c0E2932edEBE713bDc3](https://coston2-explorer.flare.network/address/0x9C22c9F1954f2E1D7B305c0E2932edEBE713bDc3) |
+| **FlareTeeManager** | [0x1a9C4A0f9D76c0b1D91d22E24E573a9b377618aE](https://coston2-explorer.flare.network/address/0x1a9C4A0f9D76c0b1D91d22E24E573a9b377618aE) |
+
+> Confidential prediction market on Flare Coston2 — bets encrypted with ECIES before hitting the chain, settled trustlessly via FCC/TEE + FTSO/FDC.
+
+---
+
 ![Network](https://img.shields.io/badge/Flare_Coston2_Testnet-114-blue)
 ![Solidity](https://img.shields.io/badge/Solidity-0.8.27-purple)
 ![License](https://img.shields.io/badge/license-MIT-green)

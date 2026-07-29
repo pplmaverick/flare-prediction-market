@@ -10,7 +10,7 @@ import {
   flareContractRegistryAbi,
   testFtsoV2Abi,
 } from "./contract";
-import { fetchBetCountForMarket, fetchUserBetForMarket } from "./blockscout";
+import { fetchBetCountForMarket, fetchUserBetForMarket, fetchVaultBalance } from "./blockscout";
 import type { Address, Hex } from "viem";
 
 export function useNow(intervalMs = 1000): number {
@@ -57,6 +57,18 @@ export function useUserBet(marketId: number, address: Address | undefined) {
   return useQuery({
     queryKey: ["user-bet", marketId, address],
     queryFn: () => fetchUserBetForMarket(marketId, address as Address),
+    enabled: !!address,
+    staleTime: 15_000,
+  });
+}
+
+/** Estimated vault balance for this wallet (deposited - withdrawn), derived from Blockscout
+ * logs — an estimate only, since active bets are tracked privately in TEE memory and aren't
+ * reflected here. */
+export function useVaultBalance(address: Address | undefined) {
+  return useQuery({
+    queryKey: ["vault-balance", address],
+    queryFn: () => fetchVaultBalance(address as Address),
     enabled: !!address,
     staleTime: 15_000,
   });

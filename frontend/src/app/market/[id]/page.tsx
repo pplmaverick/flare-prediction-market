@@ -6,7 +6,6 @@ import {
   CalendarBlank,
   CloudRain,
   CurrencyCircleDollar,
-  Info,
   TrendDown,
   TrendUp,
 } from "@phosphor-icons/react";
@@ -16,7 +15,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { PlaceBetDialog } from "@/components/place-bet-dialog";
 import { YourPosition } from "@/components/your-position";
 import { FinalizeSettlementPanel } from "@/components/finalize-settlement-panel";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { WeatherSettlementPanel } from "@/components/weather-settlement-panel";
 import { useMarket, useFeedPrice, useNow, usePayTokenAddress, useErc20Meta } from "@/lib/hooks";
 import {
   bucketCount,
@@ -34,7 +33,7 @@ import { findCityName, formatCountdown, formatTokenAmount, formatUnixTimestamp }
 export default function MarketDetailPage() {
   const params = useParams<{ id: string }>();
   const marketId = Number(params.id);
-  const { data: market, isLoading, isError } = useMarket(marketId);
+  const { data: market, isLoading, isError, refetch: refetchMarket } = useMarket(marketId);
   const now = useNow();
   // Hooks must run unconditionally on every render, so this is computed
   // before the loading/error early-returns below.
@@ -164,19 +163,9 @@ export default function MarketDetailPage() {
 
             {status === "awaiting_settlement" &&
               (isPrice ? (
-                <FinalizeSettlementPanel marketId={marketId} />
+                <FinalizeSettlementPanel marketId={marketId} onSettled={refetchMarket} />
               ) : (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div className="flex items-start gap-2 rounded-lg border border-border-strong bg-surface-raised p-3 text-xs text-muted-foreground">
-                      <Info size={16} className="mt-0.5 shrink-0" />
-                      WEATHER settlement requires an FDC Web2Json proof obtained off-chain
-                      (prepare → submit → retrieve from the DA Layer). Not yet wired up in this
-                      UI — use the contracts/ Foundry scripts.
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent>See flare-foundry-starter&apos;s WeatherId.s.sol flow</TooltipContent>
-                </Tooltip>
+                <WeatherSettlementPanel marketId={marketId} market={market} />
               ))}
 
             {status === "settled" && (

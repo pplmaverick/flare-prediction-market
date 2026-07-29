@@ -7,9 +7,22 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DepositPanel } from "@/components/deposit-panel";
 import { WithdrawPanel } from "@/components/withdraw-panel";
 import { useAccount } from "wagmi";
+import { usePayTokenAddress, useErc20Meta, useVaultBalance } from "@/lib/hooks";
+import { formatTokenAmount } from "@/lib/format";
 
 export default function VaultPage() {
-  const { isConnected } = useAccount();
+  const { address, isConnected } = useAccount();
+  const { data: payToken } = usePayTokenAddress();
+  const { decimals, symbol } = useErc20Meta(payToken);
+  const { data: vaultBalance, isLoading: isBalanceLoading } = useVaultBalance(address);
+
+  const balanceReady = !isBalanceLoading && vaultBalance !== undefined && decimals !== undefined;
+  const estimatedBalance =
+    balanceReady && vaultBalance
+      ? vaultBalance.deposited - vaultBalance.withdrawn > 0n
+        ? vaultBalance.deposited - vaultBalance.withdrawn
+        : 0n
+      : undefined;
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
@@ -42,6 +55,18 @@ export default function VaultPage() {
             <p className="text-sm text-muted-foreground">Connect your wallet to continue.</p>
           ) : (
             <Tabs defaultValue="deposit">
+              <div className="mb-5 text-sm">
+                {estimatedBalance !== undefined ? (
+                  <>
+                    <p className="text-foreground">
+                      Estimated balance: {formatTokenAmount(estimatedBalance, decimals ?? 18)} {symbol ?? ""}
+                    </p>
+                    <p className="text-xs text-muted-foreground">(actual may differ due to active bets)</p>
+                  </>
+                ) : (
+                  <p className="text-muted-foreground">Loading balance...</p>
+                )}
+              </div>
               <TabsList className="mb-5">
                 <TabsTrigger value="deposit">Deposit</TabsTrigger>
                 <TabsTrigger value="withdraw">Withdraw</TabsTrigger>

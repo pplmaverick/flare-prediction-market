@@ -96,3 +96,57 @@ export async function fetchUserBetForMarket(marketId: number, bettor: Address): 
 
   return found;
 }
+
+export interface VaultBalanceTotals {
+  deposited: bigint;
+  withdrawn: bigint;
+}
+
+/** Sums this address's `DepositRequested` and `WithdrawalExecuted` amounts by walking every
+ * contract log via Blockscout's paginated API (one pass covers both event types). Feeds an
+ * *estimated* vault balance only — the real balance lives in TEE memory and can differ while
+ * bets are active. Withdrawals are matched on `to` (the event's only address field, and the
+ * one that determines where funds actually landed) rather than the original requester. */
+export async function fetchVaultBalance(address: Address): Promise<VaultBalanceTotals> {
+  const addressLower = address.toLowerCase();
+  let deposited = 0n;
+  let withdrawn = 0n;
+  let url: string | null = `${EXPLORER_BASE}/api/v2/addresses/${PREDICTION_MARKET_ADDRESS}/logs`;
+  const maxPages = 20;
+
+  for (let page = 0; url && page < maxPages; page++) {
+    const res: Response = await fetch(url);
+    if (!res.ok) throw new Error(`Blockscout API returned ${res.status}`);
+    const data: BlockscoutLogsResponse = await res.json();
+
+    for (const item of data.items) {
+      const methodCall = item.decoded?.method_call;
+      if (!methodCall) continue;
+
+      if (methodCall.startsWith("DepositRequested(")) {
+        const depositor = item.decoded?.parameters.find((p) => p.name === "depositor")?.value;
+        const amount = item.decoded?.parameters.find((p) => p.name === "amount")?.value;
+        if (depositor?.toLowerCase() === addressLower && amount !== undefined) {
+          deposited += BigInt(amount);
+        }
+      } else if (methodCall.startsWith("WithdrawalExecuted(")) {
+        const to = item.decoded?.parameters.find((p) => p.name === "to")?.value;
+        const amount = item.decoded?.parameters.find((p) => p.name === "amount")?.value;
+        if (to?.toLowerCase() === addressLower && amount !== undefined) {
+          withdrawn += BigInt(amount);
+        }
+      }
+    }
+
+    if (data.next_page_params) {
+      const qs = new URLSearchParams(
+        Object.fromEntries(Object.entries(data.next_page_params).map(([k, v]) => [k, String(v)]))
+      ).toString();
+      url = `${EXPLORER_BASE}/api/v2/addresses/${PREDICTION_MARKET_ADDRESS}/logs?${qs}`;
+    } else {
+      url = null;
+    }
+  }
+
+  return { deposited, withdrawn };
+}

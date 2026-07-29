@@ -139,6 +139,12 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
         )}
 
         <div className="flex flex-col gap-4">
+          <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">
+            <Warning size={16} weight="bold" className="mt-0.5 shrink-0" />
+            Your available balance is tracked privately by the TEE. Ensure you have deposited
+            sufficient funds in the Vault before placing a bet.
+          </div>
+
           {isPrice ? (
             <div>
               <Label>Side</Label>

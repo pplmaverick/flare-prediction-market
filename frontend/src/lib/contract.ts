@@ -37,6 +37,32 @@ export const flareContractRegistryAbi = [
   },
 ] as const;
 
+// Minimal FdcHub / FdcRequestFeeConfigurations surfaces for the WEATHER settlement flow
+// (weather-settlement-panel.tsx). Both contracts are resolved at call time via
+// flareContractRegistryAbi.getContractAddressByName("FdcHub" / "FdcRequestFeeConfigurations") —
+// same pattern as useFtsoV2Address — rather than hardcoded addresses, since the registry is the
+// only stable reference (see flare-periphery's ContractRegistry.sol: getFdcHub() /
+// getFdcRequestFeeConfigurations() resolve through the same by-name lookup).
+export const fdcHubAbi = [
+  {
+    type: "function",
+    name: "requestAttestation",
+    stateMutability: "payable",
+    inputs: [{ name: "_data", type: "bytes" }],
+    outputs: [],
+  },
+] as const;
+
+export const fdcRequestFeeConfigurationsAbi = [
+  {
+    type: "function",
+    name: "getRequestFee",
+    stateMutability: "view",
+    inputs: [{ name: "_data", type: "bytes" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
+
 export const testFtsoV2Abi = [
   {
     type: "function",

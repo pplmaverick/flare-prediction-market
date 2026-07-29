@@ -12,7 +12,13 @@ import { useToast } from "@/components/use-toast";
 import { getFriendlyErrorMessage } from "@/lib/errors";
 import { parseTokenAmount } from "@/lib/format";
 
-export function FinalizeSettlementPanel({ marketId }: { marketId: number }) {
+export function FinalizeSettlementPanel({
+  marketId,
+  onSettled,
+}: {
+  marketId: number;
+  onSettled?: () => void;
+}) {
   const { toast } = useToast();
   const [fee, setFee] = React.useState("0.05");
   const [actionId, setActionId] = React.useState("");
@@ -44,19 +50,36 @@ export function FinalizeSettlementPanel({ marketId }: { marketId: number }) {
           // deriving state from props/state.
           // eslint-disable-next-line react-hooks/set-state-in-effect
           setActionId(args.instructionId);
+          localStorage.setItem(`settlement-action-id-${marketId}`, args.instructionId);
           toast({ title: "Settlement requested", description: `Instruction ID: ${args.instructionId}` });
         }
       } catch {
         // not the event we're looking for
       }
     }
-  }, [requestReceipt.data, toast]);
+  }, [requestReceipt.data, marketId, toast]);
+
+  // Pre-fills actionId from a prior session's requestPriceSettlement call for this market, so a
+  // page reload (or revisiting later once the TEE has finished processing) doesn't lose the
+  // instruction ID needed for step 2. Mount-only by design — marketId doesn't change without a
+  // remount in how this component is used (see market/[id]/page.tsx).
+  React.useEffect(() => {
+    const stored = localStorage.getItem(`settlement-action-id-${marketId}`);
+    if (stored && !actionId) {
+      // Reacting to localStorage (an external system) on mount, not deriving state from
+      // props/state.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActionId(stored);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   React.useEffect(() => {
     if (finalizeReceipt.isSuccess) {
       toast({ title: "Market settled", description: "The TEE-signed payout result was accepted on-chain.", variant: "success" });
+      onSettled?.();
     }
-  }, [finalizeReceipt.isSuccess, toast]);
+  }, [finalizeReceipt.isSuccess, toast, onSettled]);
 
   async function handleFetch() {
     if (!actionId) return;
@@ -112,7 +135,7 @@ export function FinalizeSettlementPanel({ marketId }: { marketId: number }) {
                 }
               )
             }
-            disabled={request.isPending || requestReceipt.isLoading}
+            disabled={request.isPending || requestReceipt.isLoading || !!requestReceipt.data}
           >
             <HourglassMedium size={16} weight="bold" />
             {request.isPending || requestReceipt.isLoading ? "Requesting..." : "Request Settlement"}

@@ -67,7 +67,7 @@ export function WithdrawPanel() {
     if (!withdrawalId) return;
     const raw = await fetchResult(withdrawalId, "threshold");
     if (raw) {
-      const fields = extractResultFields(raw);
+      const fields = extractResultFields(raw, "withdraw");
       if (fields.signature) setSignature(fields.signature);
     }
   }

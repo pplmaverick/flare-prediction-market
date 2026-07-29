@@ -63,6 +63,22 @@ export function WeatherSettlementPanel({ marketId, market }: { marketId: number;
     }
   }, [finalizeReceipt.isSuccess, toast]);
 
+  // Pre-fills actionId from a prior session's requestWeatherSettlement call for this market, so
+  // a page reload (or revisiting later once the TEE has finished processing) doesn't lose the
+  // instruction ID needed for step 2. Mount-only by design (same pattern as
+  // FinalizeSettlementPanel) — marketId doesn't change without a remount in how this component
+  // is used (see market/[id]/page.tsx).
+  React.useEffect(() => {
+    const stored = localStorage.getItem(`weather-settlement-action-id-${marketId}`);
+    if (stored && !actionId) {
+      // Reacting to localStorage (an external system) on mount, not deriving state from
+      // props/state.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActionId(stored);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const busy = step1Phase !== "idle" && step1Phase !== "done" && step1Phase !== "error";
 
   /** Fully automated FDC flow: prepare (Verifier, via our /api/fdc/prepare proxy) -> submit
@@ -123,6 +139,7 @@ export function WeatherSettlementPanel({ marketId, market }: { marketId: number;
           if (decoded.eventName === "SettlementRequested") {
             const args = decoded.args as { instructionId: Hex };
             setActionId(args.instructionId);
+            localStorage.setItem(`weather-settlement-action-id-${marketId}`, args.instructionId);
             toast({ title: "Settlement requested", description: `Instruction ID: ${args.instructionId}` });
           }
         } catch {

@@ -13,6 +13,7 @@
 
 ---
 
+[![CI](https://github.com/pplmaverick/flare-prediction-market/actions/workflows/ci.yml/badge.svg)](https://github.com/pplmaverick/flare-prediction-market/actions/workflows/ci.yml)
 ![Network](https://img.shields.io/badge/Flare_Coston2_Testnet-114-blue)
 ![Solidity](https://img.shields.io/badge/Solidity-0.8.27-purple)
 ![License](https://img.shields.io/badge/license-MIT-green)

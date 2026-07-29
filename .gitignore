@@ -15,6 +15,9 @@ dist/
 # Simulated TEE keypair (extension/src/keys.ts) — local dev secret, never commit
 .simulated_keys.json
 
+# Simulated TEE ledger snapshot (extension/src/server.ts) — balance/bet data, never commit
+extension/data/
+
 # Foundry — dependencies/ is fetched via `forge soldeer install`, not committed
 # (matches flare-foundry-starter's .gitignore). soldeer.lock IS tracked for
 # reproducible installs, same as a package-lock.json.

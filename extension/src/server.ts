@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import axios from 'axios';
 import express from 'express';
 import { AbiCoder, Wallet, keccak256, getBytes, toUtf8Bytes, concat } from 'ethers';
@@ -101,6 +103,52 @@ function getBalance(address: string): UserBalance {
 }
 function setBalance(address: string, bal: UserBalance): void {
   balanceLedger.set(address.toLowerCase(), bal);
+}
+
+// --- ledger persistence ---------------------------------------------------
+// Simple JSON snapshot on disk so balances/bets survive a restart. Not a
+// durable store — last writer wins, no locking — good enough for this
+// simulated TEE's dev/test usage.
+const LEDGER_PATH = path.join(__dirname, '..', 'data', 'ledger.json');
+
+interface LedgerSnapshot {
+  balances: [string, { available: string; locked: string }][];
+  bets: [string, Bet[]][];
+}
+
+function saveLedger(): void {
+  const snapshot: LedgerSnapshot = {
+    balances: Array.from(balanceLedger.entries()).map(([address, bal]) => [
+      address,
+      { available: bal.available.toString(), locked: bal.locked.toString() },
+    ]),
+    bets: Array.from(betLedger.entries()),
+  };
+  try {
+    fs.mkdirSync(path.dirname(LEDGER_PATH), { recursive: true });
+    fs.writeFileSync(LEDGER_PATH, JSON.stringify(snapshot, null, 2));
+  } catch (err) {
+    console.error('[ledger] failed to save', err);
+  }
+}
+
+function loadLedger(): void {
+  if (!fs.existsSync(LEDGER_PATH)) return;
+  try {
+    const raw = fs.readFileSync(LEDGER_PATH, 'utf8');
+    const snapshot: LedgerSnapshot = JSON.parse(raw);
+    for (const [address, bal] of snapshot.balances ?? []) {
+      balanceLedger.set(address, { available: BigInt(bal.available), locked: BigInt(bal.locked) });
+    }
+    for (const [marketId, bets] of snapshot.bets ?? []) {
+      betLedger.set(marketId, bets);
+    }
+    console.log(
+      `[ledger] loaded ${balanceLedger.size} balance(s), ${betLedger.size} market(s) from ${LEDGER_PATH}`
+    );
+  } catch (err) {
+    console.error('[ledger] failed to load', err);
+  }
 }
 
 // --- ActionResult signing ---------------------------------------------------
@@ -247,6 +295,7 @@ async function handlePredictionMarket(
     const bal = getBalance(depositor);
     bal.available += amount;
     setBalance(depositor, bal);
+    saveLedger();
     await postResult(buildResult(action, OP_PREDICTION_MARKET, opCommand, '0x'));
     return;
   }
@@ -282,6 +331,7 @@ async function handlePredictionMarket(
     const bets = betLedger.get(key) ?? [];
     bets.push({ bettor, isUp, amount: amount.toString() });
     betLedger.set(key, bets);
+    saveLedger();
     await postResult(buildResult(action, OP_PREDICTION_MARKET, opCommand, '0x'));
     return;
   }
@@ -314,6 +364,7 @@ async function handlePredictionMarket(
       }
       setBalance(bet.bettor, bal);
     }
+    saveLedger();
 
     const resultData = abiCoder.encode(
       ['uint256', 'bool', 'uint256'],
@@ -342,6 +393,7 @@ async function handlePredictionMarket(
     }
     bal.available -= amount;
     setBalance(requester, bal);
+    saveLedger();
 
     await postResult(buildResult(action, OP_PREDICTION_MARKET, opCommand, '0x'));
     return;
@@ -453,3 +505,5 @@ console.log('[simulated-tee] polling proxy at', PROXY_INTERNAL);
 console.log('[simulated-tee] public key X:', pubKeyX);
 console.log('[simulated-tee] public key Y:', pubKeyY);
 console.log('[simulated-tee] signing address:', signingWallet.address);
+
+loadLedger();

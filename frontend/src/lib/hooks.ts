@@ -10,7 +10,7 @@ import {
   flareContractRegistryAbi,
   testFtsoV2Abi,
 } from "./contract";
-import { fetchBetCountForMarket, fetchUserBetForMarket, fetchVaultBalance } from "./blockscout";
+import { fetchBetCountForMarket, fetchUserBetForMarket, fetchVaultBalance, verifyBetOnChain } from "./blockscout";
 import type { Address, Hex } from "viem";
 
 export function useNow(intervalMs = 1000): number {
@@ -71,6 +71,17 @@ export function useVaultBalance(address: Address | undefined) {
     queryFn: () => fetchVaultBalance(address as Address),
     enabled: !!address,
     staleTime: 15_000,
+  });
+}
+
+/** Confirms one localStorage-recorded bet-history entry (My Bets page) actually happened
+ * on-chain, by exact txHash — guards against a stale/corrupted/foreign localStorage value. */
+export function useVerifyBet(marketId: number, address: Address | undefined, txHash: Hex | undefined) {
+  return useQuery({
+    queryKey: ["verify-bet", marketId, address, txHash],
+    queryFn: () => verifyBetOnChain(marketId, address as Address, txHash as Hex),
+    enabled: !!address && !!txHash,
+    staleTime: 30_000,
   });
 }
 

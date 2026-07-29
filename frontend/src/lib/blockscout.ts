@@ -97,6 +97,30 @@ export async function fetchUserBetForMarket(marketId: number, bettor: Address): 
   return found;
 }
 
+/** Confirms a specific txHash's `BetPlaced` event actually exists on-chain for this bettor and
+ * market — unlike fetchUserBetForMarket (which only surfaces the most recent bet), this checks
+ * every logged bet, since a wallet can place more than one bet on the same market. Used by the
+ * My Bets page to verify each localStorage-recorded entry against on-chain fact before trusting
+ * it (localStorage is a client-side convenience log, not a source of truth). */
+export async function verifyBetOnChain(marketId: number, bettor: Address, txHash: Hex): Promise<boolean> {
+  const bettorLower = bettor.toLowerCase();
+  const txHashLower = txHash.toLowerCase();
+  let found = false;
+
+  await forEachBetPlacedLog((item, params) => {
+    if (
+      Number(params.marketId) === marketId &&
+      params.bettor.toLowerCase() === bettorLower &&
+      item.transaction_hash.toLowerCase() === txHashLower
+    ) {
+      found = true;
+      return true;
+    }
+  });
+
+  return found;
+}
+
 export interface VaultBalanceTotals {
   deposited: bigint;
   withdrawn: bigint;

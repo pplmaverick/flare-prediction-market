@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ShieldCheck, ChartLineUp, Vault, PlusCircle } from "@phosphor-icons/react";
+import { ShieldCheck, ChartLineUp, Vault, PlusCircle, ListChecks } from "@phosphor-icons/react";
 import { WalletConnectButton } from "@/components/wallet-connect-button";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { href: "/", label: "Markets", icon: ChartLineUp },
   { href: "/vault", label: "Vault", icon: Vault },
+  { href: "/my-bets", label: "My Bets", icon: ListChecks },
   { href: "/create", label: "Create Market", icon: PlusCircle },
 ];
 

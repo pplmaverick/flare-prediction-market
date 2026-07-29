@@ -21,6 +21,7 @@ import { encryptBucketChoice } from "@/lib/ecies";
 import { getTeePublicKey } from "@/lib/tee-config";
 import { parseTokenAmount } from "@/lib/format";
 import { bucketCount, bucketRangeLabel, isPriceMarket, type MarketData } from "@/lib/market";
+import { appendBetHistory, type StoredMarketType } from "@/lib/bet-history";
 import { useToast } from "@/components/use-toast";
 import { getFriendlyErrorMessage } from "@/lib/errors";
 
@@ -47,8 +48,32 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
   const isPrice = isPriceMarket(market);
   const numBuckets = isPrice ? 2 : bucketCount(market.bucketThresholds);
 
+  // Captured at submit time (not read back out of `bucketIndex`/`amount` state later) so the
+  // history entry always reflects exactly what was sent on-chain, even if the user has since
+  // touched the form again before the receipt lands.
+  const pendingBetRef = React.useRef<{
+    marketType: StoredMarketType;
+    bucketIndex: number;
+    direction: string;
+    amountWei: string;
+  } | null>(null);
+
   React.useEffect(() => {
     if (isSuccess && hash && address) {
+      const pending = pendingBetRef.current;
+      if (pending) {
+        appendBetHistory(address, {
+          marketId: String(marketId),
+          marketType: pending.marketType,
+          direction: pending.direction,
+          bucketIndex: pending.bucketIndex,
+          amount: pending.amountWei,
+          timestamp: Date.now(),
+          txHash: hash,
+        });
+        pendingBetRef.current = null;
+      }
+
       toast({
         title: "Bet placed",
         description: "Your encrypted bet was submitted. Its side stays private until settlement.",
@@ -86,6 +111,17 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
       const amountWei = parseTokenAmount(amount, decimals);
       const ciphertext = await encryptBucketChoice(teePublicKey, bucketIndex);
       setIsEncrypting(false);
+
+      pendingBetRef.current = {
+        marketType: isPrice ? "PRICE" : "WEATHER",
+        bucketIndex,
+        direction: isPrice
+          ? bucketIndex === 1
+            ? "Up"
+            : "Down"
+          : bucketRangeLabel(market.bucketThresholds, bucketIndex),
+        amountWei: amountWei.toString(),
+      };
 
       writeContract(
         {

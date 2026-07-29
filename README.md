@@ -23,15 +23,6 @@ Compute (FCC/TEE) for an encrypted bet ledger. This is purpose-built on Flare's
 primitives, not a generic EVM prediction market ported over with a Chainlink
 feed swapped in.
 
-**Deployed on Coston2 Testnet**
-
-| Field | Value |
-|---|---|
-| Network | Flare Coston2 Testnet |
-| Chain ID | 114 |
-| Contract | `0x9C22c9F1954f2E1D7B305c0E2932edEBE713bDc3` |
-| Explorer | [View Contract](https://coston2-explorer.flare.network/address/0x9C22c9F1954f2E1D7B305c0E2932edEBE713bDc3) |
-
 ---
 
 ## Why Flare-Native

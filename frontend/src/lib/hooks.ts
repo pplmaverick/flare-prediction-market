@@ -11,6 +11,7 @@ import {
   testFtsoV2Abi,
 } from "./contract";
 import { fetchBetCountForMarket, fetchUserBetForMarket, fetchVaultBalance, verifyBetOnChain } from "./blockscout";
+import { searchCities } from "./geocoding";
 import type { Address, Hex } from "viem";
 
 export function useNow(intervalMs = 1000): number {
@@ -20,6 +21,29 @@ export function useNow(intervalMs = 1000): number {
     return () => clearInterval(id);
   }, [intervalMs]);
   return now;
+}
+
+/** Delays reflecting `value` until it's stopped changing for `delayMs` — used to avoid firing an
+ * API request on every keystroke (see create-market's city search). */
+export function useDebouncedValue<T>(value: T, delayMs = 300): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+  return debounced;
+}
+
+/** City-name search for the WEATHER create-market form, via Open-Meteo's free geocoding API.
+ * Caller is expected to pass an already-debounced query. */
+export function useCitySearch(query: string) {
+  const trimmed = query.trim();
+  return useQuery({
+    queryKey: ["city-search", trimmed],
+    queryFn: () => searchCities(trimmed),
+    enabled: trimmed.length >= 2,
+    staleTime: 5 * 60_000,
+  });
 }
 
 export function useMarketCount() {

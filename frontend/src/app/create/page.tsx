@@ -4,7 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { decodeEventLog, encodeAbiParameters } from "viem";
 import { useAccount, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
-import { CloudRain, CurrencyCircleDollar, Plus, PlusCircle, X } from "@phosphor-icons/react";
+import { CloudRain, CurrencyCircleDollar, MagnifyingGlass, MapPin, Plus, PlusCircle, X } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -12,11 +12,11 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { predictionMarketContract, MarketType } from "@/lib/contract";
 import { BUCKET_TEMPLATES, COMMON_FEEDS, DURATION_PRESETS_HOURS, WEATHER_CITIES, encodeFeedId } from "@/lib/format";
+import { useCitySearch, useDebouncedValue } from "@/lib/hooks";
+import type { CityGeocodeResult } from "@/lib/geocoding";
 import { useToast } from "@/components/use-toast";
 import { getFriendlyErrorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
-
-const CUSTOM_CITY = "custom";
 
 /** x100-scaled template thresholds -> plain °C strings for the editable input row. */
 function templateToCelsiusStrings(thresholds: readonly number[]): string[] {
@@ -42,9 +42,12 @@ export default function CreateMarketPage() {
   const [marketKind, setMarketKind] = React.useState<"PRICE" | "WEATHER">("PRICE");
   const [feed, setFeed] = React.useState<string>(COMMON_FEEDS[0]);
   const [customFeed, setCustomFeed] = React.useState("");
-  const [city, setCity] = React.useState<string>(WEATHER_CITIES[0].name);
+  const [citySearchQuery, setCitySearchQuery] = React.useState<string>(WEATHER_CITIES[0].name);
+  const [citySearchOpen, setCitySearchOpen] = React.useState(false);
   const [latitude, setLatitude] = React.useState(String(WEATHER_CITIES[0].lat));
   const [longitude, setLongitude] = React.useState(String(WEATHER_CITIES[0].lon));
+  const debouncedCityQuery = useDebouncedValue(citySearchQuery, 350);
+  const { data: cityResults, isFetching: isCitySearching } = useCitySearch(debouncedCityQuery);
   const [bucketThresholds, setBucketThresholds] = React.useState<string[]>(
     templateToCelsiusStrings(BUCKET_TEMPLATES[0].thresholds)
   );
@@ -73,16 +76,18 @@ export default function CreateMarketPage() {
     setActiveTemplate(null);
   }
 
-  function handleCityChange(name: string) {
-    setCity(name);
-    const preset = WEATHER_CITIES.find((c) => c.name === name);
-    if (preset) {
-      setLatitude(String(preset.lat));
-      setLongitude(String(preset.lon));
-    } else {
-      setLatitude("");
-      setLongitude("");
-    }
+  function selectPresetCity(preset: (typeof WEATHER_CITIES)[number]) {
+    setCitySearchQuery(preset.name);
+    setLatitude(String(preset.lat));
+    setLongitude(String(preset.lon));
+    setCitySearchOpen(false);
+  }
+
+  function selectCityResult(result: CityGeocodeResult) {
+    setCitySearchQuery(`${result.name}, ${result.country}`);
+    setLatitude(String(result.latitude));
+    setLongitude(String(result.longitude));
+    setCitySearchOpen(false);
   }
 
   const { writeContract, data: hash, isPending } = useWriteContract();
@@ -244,49 +249,91 @@ export default function CreateMarketPage() {
 
             <TabsContent value="WEATHER" className="flex flex-col gap-4">
               <div>
-                <Label htmlFor="city">Location</Label>
-                <Select
-                  id="city"
-                  className="mt-2"
-                  value={city}
-                  onValueChange={handleCityChange}
-                  options={[
-                    ...WEATHER_CITIES.map((c) => ({ value: c.name, label: c.name })),
-                    { value: CUSTOM_CITY, label: "Custom..." },
-                  ]}
-                />
-                {city === CUSTOM_CITY ? (
-                  <div className="mt-2 grid grid-cols-2 gap-3">
-                    <div>
-                      <Label htmlFor="lat">Latitude</Label>
-                      <Input
-                        id="lat"
-                        type="number"
-                        step="any"
-                        placeholder="25.033"
-                        value={latitude}
-                        onChange={(e) => setLatitude(e.target.value)}
-                        className="mt-2"
-                      />
+                <Label htmlFor="city-search">Location</Label>
+                <div className="relative mt-2">
+                  <MagnifyingGlass
+                    size={14}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <Input
+                    id="city-search"
+                    placeholder="Search city..."
+                    autoComplete="off"
+                    value={citySearchQuery}
+                    onChange={(e) => {
+                      setCitySearchQuery(e.target.value);
+                      setCitySearchOpen(true);
+                    }}
+                    onFocus={() => setCitySearchOpen(true)}
+                    onBlur={() => setTimeout(() => setCitySearchOpen(false), 150)}
+                    className="pl-8"
+                  />
+                  {citySearchOpen && debouncedCityQuery.trim().length >= 2 && (
+                    <div className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-border-strong bg-surface shadow-xl shadow-black/30">
+                      {isCitySearching ? (
+                        <p className="px-3 py-2 text-xs text-muted-foreground">Searching...</p>
+                      ) : cityResults && cityResults.length > 0 ? (
+                        cityResults.map((r, i) => (
+                          <button
+                            key={`${r.name}-${r.latitude}-${r.longitude}-${i}`}
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              selectCityResult(r);
+                            }}
+                            className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-surface-raised"
+                          >
+                            <MapPin size={14} className="shrink-0 text-muted-foreground" />
+                            {r.name}, {r.country}
+                          </button>
+                        ))
+                      ) : (
+                        <p className="px-3 py-2 text-xs text-muted-foreground">No cities found.</p>
+                      )}
                     </div>
-                    <div>
-                      <Label htmlFor="lon">Longitude</Label>
-                      <Input
-                        id="lon"
-                        type="number"
-                        step="any"
-                        placeholder="121.565"
-                        value={longitude}
-                        onChange={(e) => setLongitude(e.target.value)}
-                        className="mt-2"
-                      />
-                    </div>
+                  )}
+                </div>
+
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {WEATHER_CITIES.map((preset) => (
+                    <button
+                      key={preset.name}
+                      type="button"
+                      onClick={() => selectPresetCity(preset)}
+                      className={cn(
+                        "cursor-pointer rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+                        citySearchQuery === preset.name
+                          ? "border-primary/40 bg-primary/10 text-primary"
+                          : "border-border-strong bg-surface-raised text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {preset.name}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <Label htmlFor="lat">Latitude</Label>
+                    <Input
+                      id="lat"
+                      readOnly
+                      placeholder="—"
+                      value={latitude}
+                      className="mt-2 cursor-default text-muted-foreground"
+                    />
                   </div>
-                ) : (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Coordinates: {latitude}, {longitude}
-                  </p>
-                )}
+                  <div>
+                    <Label htmlFor="lon">Longitude</Label>
+                    <Input
+                      id="lon"
+                      readOnly
+                      placeholder="—"
+                      value={longitude}
+                      className="mt-2 cursor-default text-muted-foreground"
+                    />
+                  </div>
+                </div>
               </div>
               <div>
                 <Label>Temperature buckets</Label>

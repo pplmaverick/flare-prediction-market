@@ -49,7 +49,7 @@ export function formatUnixTimestamp(seconds: number): string {
 // 21 bytes total. Category 0x01 = Crypto. See Flare FTSOv2 docs for the
 // full category list.
 export function encodeFeedId(symbol: string, category = 0x01): `0x${string}` {
-  const nameBytes = new TextEncoder().encode(symbol);
+  const nameBytes = new TextEncoder().encode(symbol.toUpperCase().trim());
   if (nameBytes.length > 20) throw new Error("feed symbol too long (max 20 bytes)");
   const buf = new Uint8Array(21);
   buf[0] = category;
@@ -60,6 +60,23 @@ export function encodeFeedId(symbol: string, category = 0x01): `0x${string}` {
 }
 
 export const COMMON_FEEDS = ["BTC/USD", "ETH/USD", "FLR/USD", "XRP/USD"] as const;
+
+/** Full list of feeds served by Flare's FTSOv2 block-latency feed set (standard crypto feeds +
+ * the sFLR/stXRP custom feeds), used to give the Custom feed input a combobox + "unrecognized
+ * feed" warning instead of letting the user type anything blind. Source: dev.flare.network/ftso/feeds. */
+export const FTSO_FEEDS = [
+  "FLR/USD", "SGB/USD", "BTC/USD", "XRP/USD", "LTC/USD", "XLM/USD",
+  "DOGE/USD", "ADA/USD", "ALGO/USD", "ETH/USD", "FIL/USD", "ARB/USD",
+  "AVAX/USD", "BNB/USD", "POL/USD", "SOL/USD", "USDC/USD", "USDT/USD",
+  "XDC/USD", "TRX/USD", "LINK/USD", "ATOM/USD", "DOT/USD", "TON/USD",
+  "ICP/USD", "SHIB/USD", "USDS/USD", "BCH/USD", "NEAR/USD", "LEO/USD",
+  "UNI/USD", "ETC/USD", "WIF/USD", "BONK/USD", "JUP/USD", "ETHFI/USD",
+  "ENA/USD", "PYTH/USD", "HNT/USD", "SUI/USD", "PEPE/USD", "QNT/USD",
+  "AAVE/USD", "S/USD", "ONDO/USD", "TAO/USD", "FET/USD", "RENDER/USD",
+  "NOT/USD", "RUNE/USD", "TRUMP/USD", "USDX/USD", "HBAR/USD", "PENGU/USD",
+  "HYPE/USD", "APT/USD", "PAXG/USD", "BERA/USD", "OP/USD", "PUMP/USD",
+  "XPL/USD", "MON/USD", "NIGHT/USD", "sFLR/USD", "stXRP/USD",
+] as const;
 
 export const WEATHER_CITIES = [
   { name: "Taipei", lat: 25.033, lon: 121.565 },

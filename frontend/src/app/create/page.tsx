@@ -11,7 +11,7 @@ import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { predictionMarketContract, MarketType } from "@/lib/contract";
-import { BUCKET_TEMPLATES, COMMON_FEEDS, DURATION_PRESETS_HOURS, WEATHER_CITIES, encodeFeedId } from "@/lib/format";
+import { BUCKET_TEMPLATES, COMMON_FEEDS, DURATION_PRESETS_HOURS, FTSO_FEEDS, WEATHER_CITIES, encodeFeedId } from "@/lib/format";
 import { useCitySearch, useDebouncedValue } from "@/lib/hooks";
 import type { CityGeocodeResult } from "@/lib/geocoding";
 import { useToast } from "@/components/use-toast";
@@ -42,6 +42,7 @@ export default function CreateMarketPage() {
   const [marketKind, setMarketKind] = React.useState<"PRICE" | "WEATHER">("PRICE");
   const [feed, setFeed] = React.useState<string>(COMMON_FEEDS[0]);
   const [customFeed, setCustomFeed] = React.useState("");
+  const [customFeedOpen, setCustomFeedOpen] = React.useState(false);
   const [citySearchQuery, setCitySearchQuery] = React.useState<string>(WEATHER_CITIES[0].name);
   const [citySearchOpen, setCitySearchOpen] = React.useState(false);
   const [latitude, setLatitude] = React.useState(String(WEATHER_CITIES[0].lat));
@@ -53,6 +54,19 @@ export default function CreateMarketPage() {
   );
   const [activeTemplate, setActiveTemplate] = React.useState<string | null>(BUCKET_TEMPLATES[0].name);
   const [durationHours, setDurationHours] = React.useState("24");
+
+  const trimmedCustomFeed = customFeed.trim();
+  const filteredCustomFeeds = React.useMemo(() => {
+    if (!trimmedCustomFeed) return [];
+    const query = trimmedCustomFeed.toUpperCase();
+    return FTSO_FEEDS.filter((f) => f.toUpperCase().includes(query));
+  }, [trimmedCustomFeed]);
+  const isKnownFeed = FTSO_FEEDS.some((f) => f.toUpperCase() === trimmedCustomFeed.toUpperCase());
+
+  function selectCustomFeed(symbol: string) {
+    setCustomFeed(symbol);
+    setCustomFeedOpen(false);
+  }
 
   function applyTemplate(name: string) {
     const template = BUCKET_TEMPLATES.find((t) => t.name === name);
@@ -237,12 +251,41 @@ export default function CreateMarketPage() {
                   </button>
                 </div>
                 {feed === "custom" && (
-                  <Input
-                    className="mt-2"
-                    placeholder="e.g. DOGE/USD"
-                    value={customFeed}
-                    onChange={(e) => setCustomFeed(e.target.value)}
-                  />
+                  <div className="relative mt-2">
+                    <Input
+                      placeholder="e.g. DOGE/USD"
+                      autoComplete="off"
+                      value={customFeed}
+                      onChange={(e) => {
+                        setCustomFeed(e.target.value);
+                        setCustomFeedOpen(true);
+                      }}
+                      onFocus={() => setCustomFeedOpen(true)}
+                      onBlur={() => setTimeout(() => setCustomFeedOpen(false), 150)}
+                    />
+                    {customFeedOpen && trimmedCustomFeed.length > 0 && filteredCustomFeeds.length > 0 && (
+                      <div className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-border-strong bg-surface shadow-xl shadow-black/30">
+                        {filteredCustomFeeds.map((f) => (
+                          <button
+                            key={f}
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              selectCustomFeed(f);
+                            }}
+                            className="flex w-full cursor-pointer items-center px-3 py-2 text-left font-mono text-xs text-foreground transition-colors hover:bg-surface-raised"
+                          >
+                            {f}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {trimmedCustomFeed.length > 0 && !isKnownFeed && (
+                      <p className="mt-1.5 text-xs text-yellow-500">
+                        This feed may not exist on Flare FTSO. Transaction may revert.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </TabsContent>

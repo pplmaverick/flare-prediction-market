@@ -20,7 +20,7 @@ export function FinalizeSettlementPanel({
   onSettled?: () => void;
 }) {
   const { toast } = useToast();
-  const [fee, setFee] = React.useState("0.05");
+  const [fee, setFee] = React.useState("0.1");
   const [actionId, setActionId] = React.useState("");
   const [submissionTag, setSubmissionTag] = React.useState("threshold");
   const [resultData, setResultData] = React.useState("");

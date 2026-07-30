@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
 import express from 'express';
+import type { AxiosResponse } from 'axios';
 import { AbiCoder, Wallet, keccak256, getBytes, toUtf8Bytes, concat } from 'ethers';
 import * as eccrypto from 'eccrypto';
 import type { Ecies } from 'eccrypto';
@@ -13,7 +14,7 @@ import { getPrivateKey, getPublicKey } from './keys';
 // flare-foundation/tee-proxy repo — there is no GET /info / POST /action on
 // this side at all; that was the fce-weather-insurance-era shape, which this
 // proxy generation replaced.)
-const PROXY_INTERNAL = 'http://localhost:6661';
+const PROXY_INTERNAL = process.env.PROXY_INTERNAL_URL ?? 'http://localhost:6673';
 const POLL_INTERVAL_MS = 500;
 
 if (process.env.SIMULATED_TEE !== 'true') {
@@ -289,6 +290,8 @@ async function handlePredictionMarket(
   opCommand: string,
   messageHex: string
 ): Promise<void> {
+  console.log('[DEBUG] action:', JSON.stringify(action, null, 2));
+
   if (sameHash(opCommand, OP_DEPOSIT)) {
     const [depositor, amount] = abiCoder.decode(['address', 'uint256'], messageHex);
     console.log(`[DEPOSIT] depositor=${depositor} amount=${amount.toString()}`);
@@ -472,6 +475,99 @@ setInterval(() => {
   pollQueue('main').catch((err) => console.error('[poll:main] unexpected error:', err));
 }, POLL_INTERVAL_MS);
 
+// --- on-chain balance scan (GET /balance) -----------------------------------
+// Coston2's public JSON-RPC caps eth_getLogs to a 30-block range per call
+// (verified empirically 2026-07-30: `requested too many blocks ... maximum is
+// set to 30`) — scanning from the contract's deploy block (33308582) to the
+// current chain height (~33.4M) would take thousands of chunked RPC calls,
+// far too slow to redo on every cache expiry. Blockscout's REST API (same
+// one frontend/src/lib/blockscout.ts's fetchVaultBalance already uses for
+// this exact computation) serves the same decoded log data without that
+// per-call block-range limit, so we scan through it instead of a direct
+// JsonRpcProvider.getLogs.
+const BLOCKSCOUT_BASE = 'https://coston2-explorer.flare.network';
+const CONTRACT_ADDRESS = '0x9C22c9F1954f2E1D7B305c0E2932edEBE713bDc3';
+const BALANCE_CACHE_MS = 30_000;
+
+interface OnChainBalance {
+  available: bigint;
+  locked: bigint;
+}
+
+const onChainBalanceCache = new Map<string, { value: OnChainBalance; expiresAt: number }>();
+
+interface BlockscoutLogParam {
+  name: string;
+  value: string;
+}
+interface BlockscoutLogItem {
+  decoded?: { method_call: string; parameters: BlockscoutLogParam[] } | null;
+}
+interface BlockscoutLogsResponse {
+  items: BlockscoutLogItem[];
+  next_page_params: Record<string, string | number> | null;
+}
+
+// Walks every log for the contract via Blockscout's paginated API, netting
+// DepositRequested (matched on `depositor`) against WithdrawalExecuted
+// (matched on `to` — the event's only address field, and the one that
+// determines where funds actually landed). `locked` can't be derived from
+// events alone (it lives in TEE memory), so it's always reported as 0.
+async function scanOnChainBalance(address: string): Promise<OnChainBalance> {
+  const addressLower = address.toLowerCase();
+  let deposited = 0n;
+  let withdrawn = 0n;
+  let url: string | null = `${BLOCKSCOUT_BASE}/api/v2/addresses/${CONTRACT_ADDRESS}/logs`;
+  const maxPages = 50;
+
+  for (let page = 0; url && page < maxPages; page++) {
+    const res: AxiosResponse<BlockscoutLogsResponse> = await axios.get<BlockscoutLogsResponse>(url);
+    const data: BlockscoutLogsResponse = res.data;
+
+    for (const item of data.items) {
+      const methodCall = item.decoded?.method_call;
+      if (!methodCall) continue;
+
+      if (methodCall.startsWith('DepositRequested(')) {
+        const depositor = item.decoded?.parameters.find((p) => p.name === 'depositor')?.value;
+        const amount = item.decoded?.parameters.find((p) => p.name === 'amount')?.value;
+        if (depositor?.toLowerCase() === addressLower && amount !== undefined) {
+          deposited += BigInt(amount);
+        }
+      } else if (methodCall.startsWith('WithdrawalExecuted(')) {
+        const to = item.decoded?.parameters.find((p) => p.name === 'to')?.value;
+        const amount = item.decoded?.parameters.find((p) => p.name === 'amount')?.value;
+        if (to?.toLowerCase() === addressLower && amount !== undefined) {
+          withdrawn += BigInt(amount);
+        }
+      }
+    }
+
+    if (data.next_page_params) {
+      const qs: string = new URLSearchParams(
+        Object.fromEntries(Object.entries(data.next_page_params).map(([k, v]) => [k, String(v)]))
+      ).toString();
+      url = `${BLOCKSCOUT_BASE}/api/v2/addresses/${CONTRACT_ADDRESS}/logs?${qs}`;
+    } else {
+      url = null;
+    }
+  }
+
+  return { available: deposited - withdrawn, locked: 0n };
+}
+
+async function getOnChainBalance(address: string): Promise<OnChainBalance> {
+  const key = address.toLowerCase();
+  const now = Date.now();
+  const cached = onChainBalanceCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
+  const value = await scanOnChainBalance(address);
+  onChainBalanceCache.set(key, { value, expiresAt: now + BALANCE_CACHE_MS });
+  return value;
+}
+
 // --- HTTP API (balance query) -----------------------------------------------
 // Unauthenticated by design for now — any caller who knows an address can
 // read its available/locked balance. Deposit/withdraw amounts and bet
@@ -483,18 +579,23 @@ const HTTP_PORT = 3002;
 
 const app = express();
 
-app.get('/balance', (req, res) => {
+app.get('/balance', async (req, res) => {
   const address = req.query.address;
   if (typeof address !== 'string' || !ADDRESS_RE.test(address)) {
     res.status(400).json({ error: 'address query param must be a 0x-prefixed 20-byte address' });
     return;
   }
-  const bal = getBalance(address);
-  res.json({
-    address: address.toLowerCase(),
-    available: bal.available.toString(),
-    locked: bal.locked.toString(),
-  });
+  try {
+    const bal = await getOnChainBalance(address);
+    res.json({
+      address: address.toLowerCase(),
+      available: bal.available.toString(),
+      locked: bal.locked.toString(),
+    });
+  } catch (err) {
+    console.error('[balance] on-chain scan failed:', axios.isAxiosError(err) ? err.message : err);
+    res.status(502).json({ error: 'failed to scan on-chain balance' });
+  }
 });
 
 app.listen(HTTP_PORT, () => {

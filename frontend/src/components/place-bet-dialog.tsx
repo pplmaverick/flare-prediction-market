@@ -16,10 +16,10 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { predictionMarketContract } from "@/lib/contract";
-import { usePayTokenAddress, useErc20Meta } from "@/lib/hooks";
+import { usePayTokenAddress, useErc20Meta, useVaultBalance } from "@/lib/hooks";
 import { encryptBucketChoice } from "@/lib/ecies";
 import { getTeePublicKey } from "@/lib/tee-config";
-import { parseTokenAmount } from "@/lib/format";
+import { formatTokenAmount, parseTokenAmount } from "@/lib/format";
 import { bucketCount, bucketRangeLabel, isPriceMarket, type MarketData } from "@/lib/market";
 import { appendBetHistory, type StoredMarketType } from "@/lib/bet-history";
 import { useToast } from "@/components/use-toast";
@@ -40,6 +40,11 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
 
   const { data: payToken } = usePayTokenAddress();
   const { decimals, symbol } = useErc20Meta(payToken);
+  const { data: vaultBalance, isLoading: isBalanceLoading } = useVaultBalance(address);
+
+  const amountWei = amount && decimals !== undefined ? parseTokenAmount(amount, decimals) : 0n;
+  const insufficientBalance =
+    !!vaultBalance && amountWei > 0n && amountWei > vaultBalance.available;
 
   const { writeContract, data: hash, isPending, reset } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
@@ -105,10 +110,17 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
       return;
     }
     if (!amount || Number(amount) <= 0 || decimals === undefined) return;
+    if (insufficientBalance) {
+      toast({
+        title: "Insufficient balance",
+        description: "This amount exceeds your available TEE balance. Deposit more or lower the amount.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
       setIsEncrypting(true);
-      const amountWei = parseTokenAmount(amount, decimals);
       const ciphertext = await encryptBucketChoice(teePublicKey, bucketIndex);
       setIsEncrypting(false);
 
@@ -175,10 +187,13 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
         )}
 
         <div className="flex flex-col gap-4">
-          <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">
-            <Warning size={16} weight="bold" className="mt-0.5 shrink-0" />
-            Your available balance is tracked privately by the TEE. Ensure you have deposited
-            sufficient funds in the Vault before placing a bet.
+          <div className="flex items-center justify-between rounded-lg border border-border-strong bg-surface-raised p-3 text-sm">
+            <span className="text-muted-foreground">Available balance (TEE)</span>
+            <span className="font-mono tabular-nums text-foreground">
+              {isBalanceLoading || decimals === undefined
+                ? "…"
+                : `${formatTokenAmount(vaultBalance?.available ?? 0n, decimals)} ${symbol ?? ""}`}
+            </span>
           </div>
 
           {isPrice ? (
@@ -249,6 +264,12 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
               onChange={(e) => setAmount(e.target.value)}
               className="mt-2"
             />
+            {insufficientBalance && decimals !== undefined && (
+              <p className="mt-1 text-xs text-destructive">
+                Exceeds your available balance ({formatTokenAmount(vaultBalance!.available, decimals)}{" "}
+                {symbol}). Deposit more in the Vault first.
+              </p>
+            )}
           </div>
 
           <div>
@@ -271,7 +292,7 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
           <Button
             size="lg"
             onClick={handleSubmit}
-            disabled={busy || !teePublicKey || !amount || Number(amount) <= 0}
+            disabled={busy || !teePublicKey || !amount || Number(amount) <= 0 || insufficientBalance}
           >
             {isEncrypting
               ? "Encrypting..."
@@ -279,7 +300,9 @@ export function PlaceBetDialog({ marketId, market }: { marketId: number; market:
                 ? "Confirm in wallet..."
                 : isConfirming
                   ? "Submitting..."
-                  : "Encrypt & Place Bet"}
+                  : insufficientBalance
+                    ? "Insufficient balance"
+                    : "Encrypt & Place Bet"}
           </Button>
         </div>
       </DialogContent>

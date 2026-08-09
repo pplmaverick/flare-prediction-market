@@ -2,9 +2,9 @@
 pragma solidity ^0.8.27;
 
 import { Test } from "forge-std/Test.sol";
-import { PredictionMarket } from "../src/PredictionMarket.sol";
-import { ITeeExtensionRegistry } from "../interfaces/ITeeExtensionRegistry.sol";
-import { ITeeMachineRegistry } from "../interfaces/ITeeMachineRegistry.sol";
+import { PredictionMarket } from "contracts/src/PredictionMarket.sol";
+import { ITeeExtensionRegistry } from "contracts/interfaces/ITeeExtensionRegistry.sol";
+import { ITeeMachineRegistry } from "contracts/interfaces/ITeeMachineRegistry.sol";
 import { ContractRegistry } from "flare-periphery/src/coston2/ContractRegistry.sol";
 
 /// @notice Minimal ERC-20 mock used as PredictionMarket's payToken. Implements the same

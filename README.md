@@ -42,56 +42,7 @@ of these are things you'd reach for on a generic EVM chain.
 
 ## Architecture
 
-```
- User
-   │  deposit() / placeBet() / requestPriceSettlement() / requestWeatherSettlement()
-   ▼
- ┌────────────────────────────────────────────────────────────┐
- │ PredictionMarket.sol  (Coston2, this repo)                  │
- │  - PRICE markets: reads FTSO directly (no TEE round trip)   │
- │  - WEATHER markets: verifies FDC Web2Json proof on-chain    │
- │  - both paths resolve "what happened" BEFORE asking the TEE │
- └───────────────────────────┬──────────────────────────────────┘
-                              │ TEE_EXTENSION_REGISTRY.sendInstructions()
-                              ▼
- ┌────────────────────────────────────────────────────────────┐
- │ FlareTeeManager  (Flare's shared registry, Diamond proxy)    │
- │  TeeExtensionRegistry + TeeMachineRegistry                   │
- │  → getRandomTeeIds() picks a registered TEE machine          │
- └───────────────────────────┬──────────────────────────────────┘
-                              │ instruction queued
-                              ▼
- ┌────────────────────────────────────────────────────────────┐
- │ tee-proxy                                                    │
- │  indexes the instruction from chain, queues it for the node, │
- │  collects data-provider cosignatures (threshold submission)  │
- └───────────────────────────┬──────────────────────────────────┘
-                              │ POST /queue/main (polled by the node)
-                              ▼
- ┌────────────────────────────────────────────────────────────┐
- │ extension-tee  (Go, github.com/flare-foundation/tee-node)    │
- │  tee-node core forwards the action to our handler:           │
- │  POST /action → internal/extension/extension.go              │
- │    processAction() → OPType/OPCommand router                 │
- │    → DEPOSIT / PLACE_BET / SETTLE / WITHDRAW                 │
- │  (PLACE_BET decrypts via the node's own /decrypt endpoint)   │
- └───────────────────────────┬──────────────────────────────────┘
-                              │ ActionResult (signed automatically by
-                              │ tee-node's router.SignResult — the extension
-                              │ never touches the private key)
-                              ▼
- ┌────────────────────────────────────────────────────────────┐
- │ tee-proxy → cosigned by Coston2 data providers                │
- └───────────────────────────┬──────────────────────────────────┘
-                              │ settlePriceMarket() / settleWeatherMarket() /
-                              │ executeWithdrawal(..., signature)
-                              ▼
- ┌────────────────────────────────────────────────────────────┐
- │ PredictionMarket.sol                                         │
- │  ecrecover(payloadHash, signature) == teeAddress ?            │
- │  → finalize market / release funds                           │
- └────────────────────────────────────────────────────────────┘
-```
+![Architecture](./docs/flare_architecture.svg)
 
 ---
 

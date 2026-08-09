@@ -1,0 +1,123 @@
+<svg width="100%" viewBox="0 0 680 860" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Flare Prediction Market — Architecture</title>
+<desc>Vertical flowchart showing the full request lifecycle from user actions through PredictionMarket contract, FlareTeeManager, tee-proxy, extension-tee, and back to on-chain settlement.</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    text { font-family: -apple-system, "Segoe UI", sans-serif; }
+    .th { font-size: 14px; font-weight: 500; fill: #3C3489; }
+    .ts { font-size: 12px; font-weight: 400; fill: #534AB7; }
+    /* Purple */
+    .c-purple rect { fill: #EEEDFE; stroke: #534AB7; }
+    /* Blue */
+    .c-blue rect { fill: #E6F1FB; stroke: #185FA5; }
+    .c-blue .th { fill: #0C447C; }
+    .c-blue .ts { fill: #185FA5; }
+    /* Teal */
+    .c-teal rect { fill: #E1F5EE; stroke: #0F6E56; }
+    .c-teal .th { fill: #085041; }
+    .c-teal .ts { fill: #0F6E56; }
+    /* Amber */
+    .c-amber rect { fill: #FAEEDA; stroke: #854F0B; }
+    .c-amber .th { fill: #633806; }
+    .c-amber .ts { fill: #854F0B; }
+    /* Gray */
+    .c-gray rect { fill: #F1EFE8; stroke: #5F5E5A; }
+    .c-gray .th { fill: #444441; }
+    .c-gray .ts { fill: #5F5E5A; }
+    .arr { stroke: #888780; stroke-width: 1.5; fill: none; }
+    .legend-ts { font-size: 11px; fill: #5F5E5A; font-family: -apple-system, "Segoe UI", sans-serif; }
+  </style>
+</defs>
+
+<!-- User -->
+<g class="c-gray">
+  <rect x="200" y="20" width="280" height="44" rx="8" stroke-width="0.5"/>
+  <text class="th" x="340" y="38" text-anchor="middle" dominant-baseline="central">User</text>
+  <text class="ts" x="340" y="56" text-anchor="middle" dominant-baseline="central">deposit / placeBet / requestSettlement</text>
+</g>
+
+<line x1="340" y1="64" x2="340" y2="88" class="arr" marker-end="url(#arrow)"/>
+
+<!-- PredictionMarket.sol -->
+<g class="c-purple">
+  <rect x="100" y="90" width="480" height="100" rx="8" stroke-width="0.5"/>
+  <text class="th" x="340" y="112" text-anchor="middle" dominant-baseline="central">PredictionMarket.sol — Coston2</text>
+  <text class="ts" x="340" y="134" text-anchor="middle" dominant-baseline="central">PRICE: reads FTSO directly (no TEE round trip)</text>
+  <text class="ts" x="340" y="152" text-anchor="middle" dominant-baseline="central">WEATHER: verifies FDC Web2Json proof on-chain</text>
+  <text class="ts" x="340" y="170" text-anchor="middle" dominant-baseline="central">resolves "what happened" BEFORE asking TEE</text>
+</g>
+
+<line x1="340" y1="190" x2="340" y2="214" class="arr" marker-end="url(#arrow)"/>
+<text class="legend-ts" x="340" y="206" text-anchor="middle" dominant-baseline="central">TEE_EXTENSION_REGISTRY.sendInstructions()</text>
+
+<!-- FlareTeeManager -->
+<g class="c-blue">
+  <rect x="100" y="216" width="480" height="80" rx="8" stroke-width="0.5"/>
+  <text class="th" x="340" y="238" text-anchor="middle" dominant-baseline="central">FlareTeeManager — Diamond proxy</text>
+  <text class="ts" x="340" y="258" text-anchor="middle" dominant-baseline="central">TeeExtensionRegistry + TeeMachineRegistry</text>
+  <text class="ts" x="340" y="276" text-anchor="middle" dominant-baseline="central">getRandomTeeIds() picks a registered TEE machine</text>
+</g>
+
+<line x1="340" y1="296" x2="340" y2="320" class="arr" marker-end="url(#arrow)"/>
+<text class="legend-ts" x="340" y="312" text-anchor="middle" dominant-baseline="central">instruction queued on-chain</text>
+
+<!-- tee-proxy -->
+<g class="c-teal">
+  <rect x="100" y="322" width="480" height="80" rx="8" stroke-width="0.5"/>
+  <text class="th" x="340" y="344" text-anchor="middle" dominant-baseline="central">tee-proxy</text>
+  <text class="ts" x="340" y="364" text-anchor="middle" dominant-baseline="central">indexes instruction from chain, queues for node</text>
+  <text class="ts" x="340" y="382" text-anchor="middle" dominant-baseline="central">collects data-provider cosignatures (threshold)</text>
+</g>
+
+<line x1="340" y1="402" x2="340" y2="426" class="arr" marker-end="url(#arrow)"/>
+<text class="legend-ts" x="340" y="418" text-anchor="middle" dominant-baseline="central">POST /queue/main (polled by node)</text>
+
+<!-- extension-tee -->
+<g class="c-amber">
+  <rect x="100" y="428" width="480" height="120" rx="8" stroke-width="0.5"/>
+  <text class="th" x="340" y="450" text-anchor="middle" dominant-baseline="central">extension-tee — Go (flare-foundation/tee-node)</text>
+  <text class="ts" x="340" y="470" text-anchor="middle" dominant-baseline="central">tee-node core forwards action to our handler</text>
+  <text class="ts" x="340" y="488" text-anchor="middle" dominant-baseline="central">POST /action → internal/extension/extension.go</text>
+  <text class="ts" x="340" y="506" text-anchor="middle" dominant-baseline="central">processAction() → DEPOSIT / PLACE_BET / SETTLE / WITHDRAW</text>
+  <text class="ts" x="340" y="524" text-anchor="middle" dominant-baseline="central">PLACE_BET decrypts via node's own /decrypt (ECIES)</text>
+</g>
+
+<line x1="340" y1="548" x2="340" y2="576" class="arr" marker-end="url(#arrow)"/>
+<text class="legend-ts" x="340" y="558" text-anchor="middle" dominant-baseline="central">ActionResult — signed by tee-node router.SignResult</text>
+<text class="legend-ts" x="340" y="570" text-anchor="middle" dominant-baseline="central">extension never touches the private key</text>
+
+<!-- tee-proxy cosign -->
+<g class="c-teal">
+  <rect x="100" y="578" width="480" height="44" rx="8" stroke-width="0.5"/>
+  <text class="th" x="340" y="592" text-anchor="middle" dominant-baseline="central">tee-proxy</text>
+  <text class="ts" x="340" y="610" text-anchor="middle" dominant-baseline="central">cosigned by Coston2 data providers</text>
+</g>
+
+<line x1="340" y1="622" x2="340" y2="648" class="arr" marker-end="url(#arrow)"/>
+<text class="legend-ts" x="340" y="634" text-anchor="middle" dominant-baseline="central">settlePriceMarket / settleWeatherMarket / executeWithdrawal(…, sig)</text>
+
+<!-- PredictionMarket.sol settlement -->
+<g class="c-purple">
+  <rect x="100" y="650" width="480" height="64" rx="8" stroke-width="0.5"/>
+  <text class="th" x="340" y="672" text-anchor="middle" dominant-baseline="central">PredictionMarket.sol — settlement</text>
+  <text class="ts" x="340" y="692" text-anchor="middle" dominant-baseline="central">ecrecover(payloadHash, signature) == teeAddress?</text>
+  <text class="ts" x="340" y="710" text-anchor="middle" dominant-baseline="central">→ finalize market / release funds</text>
+</g>
+
+<!-- Divider -->
+<line x1="100" y1="736" x2="580" y2="736" stroke="#D3D1C7" stroke-width="0.5"/>
+
+<!-- Legend pills -->
+<g class="c-purple"><rect x="108" y="748" width="106" height="22" rx="11" stroke-width="0.5"/><text class="legend-ts" x="161" y="759" text-anchor="middle" dominant-baseline="central">On-chain contract</text></g>
+<g class="c-blue"><rect x="224" y="748" width="110" height="22" rx="11" stroke-width="0.5"/><text class="legend-ts" x="279" y="759" text-anchor="middle" dominant-baseline="central">Flare infra (shared)</text></g>
+<g class="c-teal"><rect x="344" y="748" width="76" height="22" rx="11" stroke-width="0.5"/><text class="legend-ts" x="382" y="759" text-anchor="middle" dominant-baseline="central">tee-proxy</text></g>
+<g class="c-amber"><rect x="430" y="748" width="148" height="22" rx="11" stroke-width="0.5"/><text class="legend-ts" x="504" y="759" text-anchor="middle" dominant-baseline="central">TEE node extension</text></g>
+
+<!-- Simulated TEE note -->
+<rect x="100" y="784" width="480" height="32" rx="6" fill="none" stroke="#D3D1C7" stroke-width="0.5" stroke-dasharray="4 3"/>
+<text class="legend-ts" x="340" y="800" text-anchor="middle" dominant-baseline="central">SIMULATED_TEE=true + attestation.enable=false (software-simulated, not hardware SGX)</text>
+
+</svg>

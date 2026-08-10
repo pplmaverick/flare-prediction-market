@@ -59,6 +59,34 @@ const OP_PLACE_BET = opHash('PLACE_BET');
 const OP_SETTLE = opHash('SETTLE');
 const OP_WITHDRAW = opHash('WITHDRAW');
 
+// tee-proxy's recoverSigner doesn't verify ActionResult.Hash() directly — it
+// wraps it in go-flare-common's signing.Payload{Prefix, ChainID, DataHash}
+// (an abi-encoded (bytes32,uint256,bytes32) tuple, keccak256'd) before
+// checking the signature. Same domain-separation scheme PredictionMarket.sol
+// uses for SETTLE results. Omitting this wrapper is what was causing
+// "verifying response signature: signature check fail" on every result,
+// including the TEE_INFO bootstrap.
+const PREFIX_TEE_ACTION_RESULT = opHash('TEE_ACTION_RESULT');
+const CHAIN_ID = BigInt(process.env.CHAIN_ID ?? '114');
+
+// PredictionMarket's own extensionId (contracts/src/PredictionMarket.sol
+// _extensionId, storage slot 0 — read via `cast storage` since it has no
+// public getter). Fixed for this deployed contract at
+// 0x9C22c9F1954f2E1D7B305c0E2932edEBE713bDc3; only changes on redeploy.
+// register() checks the caller/claim-back owner against THIS extension's
+// registered owner — registering under extensionId 0 (nobody's) is what was
+// causing OwnerNotAllowed.
+const EXTENSION_ID = BigInt(process.env.EXTENSION_ID ?? '65749');
+const EXTENSION_ID_HASH = '0x' + EXTENSION_ID.toString(16).padStart(64, '0');
+
+function signedResultHash(result: ActionResult): string {
+  const encoded = abiCoder.encode(
+    ['bytes32', 'uint256', 'bytes32'],
+    [PREFIX_TEE_ACTION_RESULT, CHAIN_ID, actionResultHash(result)]
+  );
+  return keccak256(encoded);
+}
+
 // --- ECIES wire format --------------------------------------------------
 // eccrypto.encrypt()/decrypt() operate on a 4-field object; on-chain we only
 // have room for one `bytes` blob, so we concatenate as:
@@ -177,7 +205,7 @@ function actionResultHash(result: ActionResult): string {
   return keccak256(concat([dataHash, idBytes, tagHash, statusByte]));
 }
 
-// ethers returns v=27 or 28 (personal_sign convention); go-ethereum's
+// ethers' SigningKey.sign() always encodes v as 27/28; go-ethereum's
 // crypto.SigToPub (tee-proxy's recoverSigner) expects the raw recovery id 0/1.
 // Every signature we hand to the proxy must go through this.
 function normalizeV(sig: string): string {
@@ -190,7 +218,7 @@ function normalizeV(sig: string): string {
 }
 
 async function postResult(result: ActionResult): Promise<void> {
-  const signature = normalizeV(await signingWallet.signMessage(getBytes(actionResultHash(result))));
+  const signature = normalizeV(await signingWallet.signMessage(getBytes(signedResultHash(result))));
   try {
     await axios.post(`${PROXY_INTERNAL}/result`, {
       result,
@@ -227,14 +255,45 @@ function buildResult(
   };
 }
 
+// tee-node's types.MachineData.DataHash() (pkg/types/tee.go): keccak256 of the
+// abi-encoded IMachineManager.TeeMachineData struct — same field order as
+// MachineManagerFacet.register's ABI.
+const MACHINE_DATA_TUPLE =
+  'tuple(uint256 extensionId, address initialOwner, bytes32 codeHash, bytes32 platform, tuple(bytes32 x, bytes32 y) publicKey, bytes32 governanceHash)';
+const PREFIX_TEE_MACHINE_REGISTER = opHash('TEE_MACHINE_REGISTER');
+
+// register-tee's fccutils.GetCodeHashAndPlatform (SIMULATED_TEE=true path)
+// compares MachineData.CodeHash/.Platform against these exact hardcoded
+// sentinels, not zero — a mismatch reverts registration before it ever
+// reaches the chain.
+const SIMULATED_CODE_HASH = '0x194844cf417dde867073e5ab7199fa4d21fd82b5dbe2bdea8b3d7fc18d10fdc2';
+const SIMULATED_PLATFORM = opHash('TEST_PLATFORM');
+
+const INITIAL_OWNER = process.env.INITIAL_OWNER ?? '';
+const GOVERNANCE_SIGNERS = (process.env.GOVERNANCE_SIGNERS || INITIAL_OWNER)
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const GOVERNANCE_THRESHOLD = BigInt(process.env.GOVERNANCE_THRESHOLD ?? '1');
+
+// keccak256(abi.encode(address[] signers, uint256 threshold)) — the same
+// value the contract stores as TeeMachineData.governanceHash (tee-node's
+// types.GovernanceHash). Must match whatever set-governance registered
+// on-chain, or register() reverts InvalidGovernanceHash.
+function computeGovernanceHash(): string {
+  return keccak256(abiCoder.encode(['address[]', 'uint256'], [GOVERNANCE_SIGNERS, GOVERNANCE_THRESHOLD]));
+}
+
 // --- TEE_INFO bootstrap handshake -------------------------------------------
 // tee-proxy enqueues this to `direct` on startup with a fresh block-hash
 // challenge and PANICS if TeeInfo.Challenge doesn't echo back exactly.
-// Before SetIdentity, the proxy accepts a /result for TEE_INFO without
-// verifying its signature (internal/service/result.ProcessAndStore) — but the
-// address recovered from THIS submission's signature is what parseTeeID()
-// derives from TeeInfo.PublicKey and pins forever after, so it must be the
-// same key we sign every later result with.
+// Per tee-proxy's internal/service/info.updateInfo, the envelope signature
+// check (via postResult/signedResultHash) recomputes its domain-separated
+// payload as signing.Payload{TEE_ACTION_RESULT, result.TeeInfo.ChainID,
+// ActionResult.Hash()} — the chainID comes from THIS response's own
+// teeInfo.chainId field, not any proxy-side config, so it must be set here
+// and match the CHAIN_ID postResult signs with, or verification silently
+// recomputes against chainId=0 and fails.
 async function handleTeeInfo(action: any, requestMessageHex: string): Promise<void> {
   const reqBytes = Buffer.from(requestMessageHex.replace(/^0x/, ''), 'hex');
   // types.TeeInfoRequest has no json tag on Challenge -> Go's default
@@ -247,6 +306,7 @@ async function handleTeeInfo(action: any, requestMessageHex: string): Promise<vo
   const teeInfo = {
     challenge,
     publicKey: { x: pubKeyX, y: pubKeyY },
+    chainId: Number(CHAIN_ID),
     initialSigningPolicyId: 0,
     initialSigningPolicyHash: zeroHash,
     lastSigningPolicyId: 0,
@@ -260,22 +320,27 @@ async function handleTeeInfo(action: any, requestMessageHex: string): Promise<vo
     teeTimestamp: Math.floor(Date.now() / 1000),
   };
 
+  const governanceHash = computeGovernanceHash();
+
   const machineData = {
-    extensionId: zeroHash,
-    initialOwner: signingWallet.address,
-    codeHash: zeroHash,
-    platform: zeroHash,
+    extensionId: EXTENSION_ID_HASH,
+    initialOwner: INITIAL_OWNER,
+    codeHash: SIMULATED_CODE_HASH,
+    platform: SIMULATED_PLATFORM,
     publicKey: { x: pubKeyX, y: pubKeyY },
+    governanceHash,
   };
 
-  // Not independently re-verified anywhere when attestation is disabled
-  // (pkg/attestation.Verify short-circuits to nil) — signed on a best-effort
-  // basis so the field is at least well-formed. Normalized the same way as
-  // ActionResponse.Signature in case anything downstream ever recovers it
-  // with go-ethereum's crypto.SigToPub instead of ecrecover.
-  const dataSignature = normalizeV(
-    await signingWallet.signMessage(getBytes(keccak256(toUtf8Bytes(JSON.stringify(teeInfo)))))
+  const machineDataHash = keccak256(
+    abiCoder.encode(
+      [MACHINE_DATA_TUPLE],
+      [[EXTENSION_ID, INITIAL_OWNER, SIMULATED_CODE_HASH, SIMULATED_PLATFORM, [pubKeyX, pubKeyY], governanceHash]]
+    )
   );
+  const signedMachineDataHash = keccak256(
+    abiCoder.encode(['bytes32', 'uint256', 'bytes32'], [PREFIX_TEE_MACHINE_REGISTER, CHAIN_ID, machineDataHash])
+  );
+  const dataSignature = normalizeV(await signingWallet.signMessage(getBytes(signedMachineDataHash)));
 
   const teeInfoResponse = { teeInfo, machineData, dataSignature, attestation: '' };
   const dataHex = '0x' + Buffer.from(JSON.stringify(teeInfoResponse), 'utf8').toString('hex');

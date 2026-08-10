@@ -16,6 +16,7 @@ services:
       - ./config/proxy/extension_proxy.coston2.docker.toml:/app/config/config.toml:ro
     environment:
       - PROXY_PRIVATE_KEY=${PROXY_PRIVATE_KEY}
+      - PRIVATE_KEY=${PROXY_PRIVATE_KEY}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
